@@ -6,7 +6,7 @@ from core.models import PacketLog, AgentRegistration, AgentHeartbeat
 from core.database import packet_queue
 from ..config import AGENT_API_KEY
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix="/api/v1/collect")
 
 def validate_agent_key(request: Request) -> bool:
     key = request.headers.get("X-API-Key")
@@ -38,11 +38,11 @@ async def receive_batch_logs(logs: List[PacketLog], auth: bool = Depends(validat
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-@router.post("/agent/register")
+@router.post("/register")
 async def register_agent(reg: AgentRegistration, auth: bool = Depends(validate_agent_key)):
     print(f"[+] Agent Registered: {reg.agent_id} ({reg.hostname})")
     return {"status": "registered", "server_time": datetime.datetime.now().isoformat()}
 
-@router.post("/agent/heartbeat")
+@router.post("/heartbeat")
 async def agent_heartbeat(hb: AgentHeartbeat, auth: bool = Depends(validate_agent_key)):
     return {"status": "alive", "server_time": datetime.datetime.now().isoformat()}

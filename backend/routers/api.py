@@ -8,7 +8,7 @@ from ..dependencies import login_required
 from ..services.data_service import get_stats, fetch_recent_traffic, export_to_csv_task, truncate_data
 from core.models import HotspotRequest, SystemConfigRequest
 
-router = APIRouter(prefix="/api")
+router = APIRouter()
 
 # Default State (moved to dynamic or remained in memory)
 START_TIME = time.time()
