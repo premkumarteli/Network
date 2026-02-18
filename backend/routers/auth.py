@@ -62,7 +62,7 @@ async def register_handler(request: Request, username: str = Form(...), email: s
         if 'cursor' in locals(): cursor.close()
         conn.close()
 
-@router.get("/logout")
+@router.get("/logout", name="logout_view")
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
