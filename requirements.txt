@@ -8,3 +8,5 @@ requests
 scapy
 colorama
 python-dotenv
+bcrypt
+itsdangerous

@@ -1,4 +1,4 @@
-import mysql.connector
+import sqlite3
 from fastapi import FastAPI, Depends, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -66,16 +66,19 @@ class AgentHeartbeat(BaseModel):
     time: str
 
 # --- DATABASE CONFIG ---
-db_config = {
-    "host": os.getenv("NETVISOR_DB_HOST", "localhost"),
-    "user": os.getenv("NETVISOR_DB_USER", "root"),
-    "password": os.getenv("NETVISOR_DB_PASSWORD", ""),
-    "database": os.getenv("NETVISOR_DB_NAME", "network_security"),
-}
+# db_config removed as we are using SQLite file
+
+def dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
 
 def get_db_connection():
     try:
-        return mysql.connector.connect(**db_config)
+        conn = sqlite3.connect('netvisor.db')
+        conn.row_factory = dict_factory
+        return conn
     except Exception as exc:
         print(f"{Fore.RED}[X] DB connection error: {exc}")
         return None
@@ -110,8 +113,8 @@ def truncate_data():
     if conn:
         try:
             cursor = conn.cursor()
-            cursor.execute("TRUNCATE TABLE traffic_logs")
-            cursor.execute("TRUNCATE TABLE activity_logs")
+            cursor.execute("DELETE FROM traffic_logs")
+            cursor.execute("DELETE FROM activity_logs")
             conn.commit()
             return True
         except Exception as e:
@@ -127,7 +130,7 @@ def init_db():
             cursor = conn.cursor()
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS traffic_logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp VARCHAR(50),
                     source_ip VARCHAR(50),
                     device_name VARCHAR(50),
@@ -159,7 +162,7 @@ def init_db():
 
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS users (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username VARCHAR(50) UNIQUE NOT NULL,
                     password VARCHAR(255) NOT NULL,
                     email VARCHAR(100),
@@ -168,7 +171,7 @@ def init_db():
             """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS activity_logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                     username VARCHAR(50),
                     action VARCHAR(255),
@@ -178,10 +181,10 @@ def init_db():
             """)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS device_aliases (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
                     ip_address VARCHAR(50) UNIQUE NOT NULL,
                     device_name VARCHAR(100) NOT NULL,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.commit()
@@ -189,18 +192,18 @@ def init_db():
             admin_user = os.getenv("NETVISOR_BOOTSTRAP_ADMIN_USERNAME", "admin")
             admin_pass = os.getenv("NETVISOR_BOOTSTRAP_ADMIN_PASSWORD", "pppp")
             
-            cursor.execute("SELECT password FROM users WHERE username = %s", (admin_user,))
+            cursor.execute("SELECT password FROM users WHERE username = ?", (admin_user,))
             row = cursor.fetchone()
             if not row:
                 hashed_admin_pass = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
-                cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (admin_user, hashed_admin_pass, "admin"))
+                cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (admin_user, hashed_admin_pass, "admin"))
                 conn.commit()
             else:
                 current_hashed = row[0]
                 # Upgrade if it looks like SHA256 (64 chars) and not bcrypt
                 if len(current_hashed) == 64 and not current_hashed.startswith("$2b$"):
                     new_hashed = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
-                    cursor.execute("UPDATE users SET password = %s WHERE username = %s", (new_hashed, admin_user))
+                    cursor.execute("UPDATE users SET password = ? WHERE username = ?", (new_hashed, admin_user))
                     conn.commit()
                     print(f"{Fore.YELLOW}[!] Admin password upgraded to bcrypt.")
                 
@@ -235,7 +238,7 @@ async def db_writer_worker():
             if conn:
                 try:
                     cursor = conn.cursor()
-                    sql = "INSERT INTO traffic_logs (timestamp, source_ip, dst_ip, device_name, domain, protocol, port, risk_score, entropy, severity, agent_id, packet_size, device_type, os_family, brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                    sql = "INSERT INTO traffic_logs (timestamp, source_ip, dst_ip, device_name, domain, protocol, port, risk_score, entropy, severity, agent_id, packet_size, device_type, os_family, brand) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     vals = [(
                         l.time, l.src_ip, l.dst_ip, l.device_name or "Unknown", l.domain, l.protocol, l.port,
                         l.risk_score, l.entropy, (l.severity or "LOW").upper(), l.agent_id, l.size,
@@ -353,8 +356,8 @@ def fetch_recent_traffic(limit=1000):
     conn = get_db_connection()
     if not conn: return []
     try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM traffic_logs ORDER BY id DESC LIMIT %s", (limit,))
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM traffic_logs ORDER BY id DESC LIMIT ?", (limit,))
         rows = cursor.fetchall()
         cursor.close()
         conn.close()
@@ -527,8 +530,8 @@ async def login_page(request: Request):
 async def login_handler(request: Request, username: str = Form(...), password: str = Form(...)):
     conn = get_db_connection()
     if not conn: return templates.TemplateResponse("login.html", {"request": request, "error": "DB Error", "url_for": fastapi_url_for_compat(request)})
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
     user = cursor.fetchone()
     
     # 🕵️ Debug Log
@@ -558,12 +561,12 @@ async def register_handler(request: Request, username: str = Form(...), email: s
     if not conn: return {"status": "error"}
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM users WHERE username = %s OR email = %s", (username, email))
+        cursor.execute("SELECT * FROM users WHERE username = ? OR email = ?", (username, email))
         if cursor.fetchone():
             return templates.TemplateResponse("register.html", {"request": request, "error_message": "Username or Email already exists.", "url_for": fastapi_url_for_compat(request)})
         
         hashed = hash_password(password)
-        cursor.execute("INSERT INTO users (username, password, email, role) VALUES (%s, %s, %s, %s)", (username, hashed, email, "user"))
+        cursor.execute("INSERT INTO users (username, password, email, role) VALUES (?, ?, ?, ?)", (username, hashed, email, "user"))
         conn.commit()
         cursor.close(); conn.close()
         return RedirectResponse(url="/login", status_code=303)
