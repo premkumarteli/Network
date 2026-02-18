@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, Depends
-from .auth import login_required
+from ..dependencies import login_required
 from ..templates import templates, fastapi_url_for_compat
 
 router = APIRouter()

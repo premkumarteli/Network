@@ -123,12 +123,15 @@ def init_db():
                 print(f"{Fore.YELLOW}[!] NETVISOR_BOOTSTRAP_ADMIN_PASSWORD not set. Skipping admin bootstrap/upgrade.")
                 
             cursor.close()
-            conn.close()
             print(f"{Fore.GREEN}[!] Database initialized.")
         except Exception as e:
             print(f"{Fore.RED}[X] DB Init Error: {e}")
         finally:
-            if conn: conn.close()
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 # --- SINGLE WRITER DB BUFFER ---
 packet_queue = asyncio.Queue(maxsize=10000)

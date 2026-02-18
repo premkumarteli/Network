@@ -4,7 +4,7 @@ import psutil
 import time
 import socket
 import os
-from .auth import login_required
+from ..dependencies import login_required
 from ..services.data_service import get_stats, fetch_recent_traffic, export_to_csv_task, truncate_data
 from core.models import HotspotRequest, SystemConfigRequest
 
