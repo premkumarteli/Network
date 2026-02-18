@@ -491,7 +491,7 @@ async def toggle_maintenance_api(data: SystemConfigRequest):
 
 @app.post("/api/settings/refresh")
 async def trigger_refresh():
-    time.sleep(0.5)
+    await asyncio.sleep(0.5)
     return {"status": "success"}
 
 @app.post("/api/admin/restart_scanner")
