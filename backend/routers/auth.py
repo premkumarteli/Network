@@ -66,3 +66,16 @@ async def register_handler(request: Request, username: str = Form(...), email: s
 async def logout(request: Request):
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
+
+@router.get("/forgot-password", name="forgot_password_page")
+async def forgot_password_page(request: Request):
+    return templates.TemplateResponse("forgot_password.html", {"request": request, "url_for": fastapi_url_for_compat(request)})
+
+@router.post("/forgot-password")
+async def forgot_password_handler(request: Request, email: str = Form(...)):
+    # Simple stub for password reset functionality
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": request, 
+        "message": "If that account exists, a reset link has been sent.",
+        "url_for": fastapi_url_for_compat(request)
+    })

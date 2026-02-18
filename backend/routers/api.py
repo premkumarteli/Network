@@ -104,7 +104,7 @@ async def reset_db_api(username: str = Depends(login_required)):
     if file and file != "empty": msg += f" Backup saved to {file}"
     return {"status": "success" if success else "error", "message": msg}
 
-@router.get("/export/devices/{fmt}", name="api_export_devices")
+@router.get("/export/devices/{fmt}", name="export_devices")
 async def api_export_devices(fmt: str, username: str = Depends(login_required)):
     filename = export_to_csv_task()
     if filename and filename != "empty":
