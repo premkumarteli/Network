@@ -5,4 +5,5 @@ from dotenv import load_dotenv
 if __name__ == "__main__":
     load_dotenv()
     # High performance uvicorn worker
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)
+    # Standardizing on 127.0.0.1 for local browser accessibility on Windows
+    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=True)
