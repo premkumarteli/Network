@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Tuple
 import uvicorn
 import os
+import hashlib
 import datetime
 import time
 import psutil
@@ -312,10 +313,20 @@ def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 def verify_password(plain_password, hashed_password):
+    # Try bcrypt first
     try:
-        return bcrypt.checkpw(plain_password.encode(), hashed_password.encode())
+        if bcrypt.checkpw(plain_password.encode(), hashed_password.encode()):
+            return True
     except:
-        return False
+        pass
+    
+    # Legacy SHA256 fallback
+    if len(hashed_password) == 64:
+        sha256_hash = hashlib.sha256(plain_password.encode()).hexdigest()
+        if sha256_hash == hashed_password:
+            return True
+            
+    return False
 
 def parse_timestamp(value) -> datetime.datetime:
     if isinstance(value, datetime.datetime):
@@ -519,9 +530,19 @@ async def login_handler(request: Request, username: str = Form(...), password: s
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
     user = cursor.fetchone()
-    if user and verify_password(password, user["password"]):
-        request.session["user_id"] = user["id"]; request.session["username"] = user["username"]; request.session["role"] = user["role"]
-        return RedirectResponse(url="/dashboard", status_code=303)
+    
+    # 🕵️ Debug Log
+    if user:
+        is_valid = verify_password(password, user["password"])
+        print(f"[DEBUG] Login attempt for user '{username}': User found, password valid? {is_valid}")
+        if is_valid:
+            request.session["user_id"] = user["id"]
+            request.session["username"] = user["username"]
+            request.session["role"] = user["role"]
+            return RedirectResponse(url="/dashboard", status_code=303)
+    else:
+        print(f"[DEBUG] Login attempt for user '{username}': User NOT found.")
+        
     return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid login", "url_for": fastapi_url_for_compat(request)})
 
 @app.get("/register", name="register_page")
