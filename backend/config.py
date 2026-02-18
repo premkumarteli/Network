@@ -1,8 +1,9 @@
 import os
 import time
 
-SECRET_KEY = os.getenv("NETVISOR_SECRET_KEY", "change-me-in-env")
-AGENT_API_KEY = os.getenv("AGENT_API_KEY", "soc-agent-key-2026")
+# CRITICAL: Mandatory environment variables for production security
+SECRET_KEY = os.environ["NETVISOR_SECRET_KEY"]
+AGENT_API_KEY = os.environ["AGENT_API_KEY"]
 START_TIME = time.time()
 
 # Default State

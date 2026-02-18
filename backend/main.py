@@ -6,6 +6,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from colorama import Fore
 import asyncio
 import os
+import logging
+
+# Initialize logging for production-grade traceability
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("netvisor")
 
 from core.database import init_db, db_writer_worker
 from .config import SECRET_KEY
@@ -37,7 +45,12 @@ async def maintenance_middleware(request: Request, call_next):
             return RedirectResponse(url="/maintenance")
     return await call_next(request)
 
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+app.add_middleware(
+    SessionMiddleware, 
+    secret_key=SECRET_KEY,
+    https_only=True,   # Enhanced security: ensures session cookie is only sent over HTTPS
+    same_site="lax"    # Protects against CSRF while maintaining user experience
+)
 
 # Static Files
 # Assuming running from root, static is in root/static

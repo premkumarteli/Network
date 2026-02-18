@@ -1,4 +1,5 @@
 import mysql.connector
+from mysql.connector import pooling
 import os
 import bcrypt
 import asyncio
@@ -12,8 +13,22 @@ db_config = {
     "database": os.getenv("NETVISOR_DB_NAME", "network_security"),
 }
 
+# Implementation of connection pooling for production-grade stability
+try:
+    pool = pooling.MySQLConnectionPool(
+        pool_name="netvisor_pool",
+        pool_size=10,
+        **db_config
+    )
+except Exception as e:
+    print(f"{Fore.RED}[X] Failed to initialize connection pool: {e}")
+    # Fallback to direct connection if pool fails (though not ideal)
+    pool = None
+
 def get_db_connection():
     try:
+        if pool:
+            return pool.get_connection()
         return mysql.connector.connect(**db_config)
     except Exception as exc:
         print(f"{Fore.RED}[X] DB connection error: {exc}")
@@ -86,28 +101,34 @@ def init_db():
             """)
             conn.commit()
             
-            admin_user = os.getenv("NETVISOR_BOOTSTRAP_ADMIN_USERNAME", "admin")
-            admin_pass = os.getenv("NETVISOR_BOOTSTRAP_ADMIN_PASSWORD", "pppp")
+            admin_user = os.environ.get("NETVISOR_BOOTSTRAP_ADMIN_USERNAME", "admin")
+            # CRITICAL: No longer providing a default password for the admin bootstrap
+            admin_pass = os.environ.get("NETVISOR_BOOTSTRAP_ADMIN_PASSWORD")
             
-            cursor.execute("SELECT password FROM users WHERE username = %s", (admin_user,))
-            row = cursor.fetchone()
-            if not row:
-                hashed_admin_pass = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
-                cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (admin_user, hashed_admin_pass, "admin"))
-                conn.commit()
-            else:
-                current_hashed = row[0]
-                if len(current_hashed) == 64 and not current_hashed.startswith("$2b$"):
-                    new_hashed = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
-                    cursor.execute("UPDATE users SET password = %s WHERE username = %s", (new_hashed, admin_user))
+            if admin_pass:
+                cursor.execute("SELECT password FROM users WHERE username = %s", (admin_user,))
+                row = cursor.fetchone()
+                if not row:
+                    hashed_admin_pass = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
+                    cursor.execute("INSERT INTO users (username, password, role) VALUES (%s, %s, %s)", (admin_user, hashed_admin_pass, "admin"))
                     conn.commit()
-                    print(f"{Fore.YELLOW}[!] Admin password upgraded to bcrypt.")
+                else:
+                    current_hashed = row[0]
+                    if len(current_hashed) == 64 and not current_hashed.startswith("$2b$"):
+                        new_hashed = bcrypt.hashpw(admin_pass.encode(), bcrypt.gensalt()).decode()
+                        cursor.execute("UPDATE users SET password = %s WHERE username = %s", (new_hashed, admin_user))
+                        conn.commit()
+                        print(f"{Fore.YELLOW}[!] Admin password upgraded to bcrypt.")
+            else:
+                print(f"{Fore.YELLOW}[!] NETVISOR_BOOTSTRAP_ADMIN_PASSWORD not set. Skipping admin bootstrap/upgrade.")
                 
             cursor.close()
             conn.close()
             print(f"{Fore.GREEN}[!] Database initialized.")
         except Exception as e:
             print(f"{Fore.RED}[X] DB Init Error: {e}")
+        finally:
+            if conn: conn.close()
 
 # --- SINGLE WRITER DB BUFFER ---
 packet_queue = asyncio.Queue(maxsize=10000)
@@ -139,9 +160,9 @@ async def db_writer_worker():
                     cursor.executemany(sql, vals)
                     conn.commit()
                     cursor.close()
-                    conn.close()
                 except Exception as e:
                     print(f"DB Worker Error: {e}")
                 finally:
+                    conn.close()
                     for _ in range(len(logs)):
                         packet_queue.task_done()

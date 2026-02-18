@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, Form, Depends
 from fastapi.responses import RedirectResponse
 from core.database import get_db_connection
 from core.security import verify_password, hash_password
-from . .templates import templates, fastapi_url_for_compat
+from ..templates import templates, fastapi_url_for_compat
 
 router = APIRouter()
 
@@ -16,17 +16,21 @@ async def login_handler(request: Request, username: str = Form(...), password: s
     if not conn: 
         return templates.TemplateResponse("login.html", {"request": request, "error": "DB Error", "url_for": fastapi_url_for_compat(request)})
     
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
-    user = cursor.fetchone()
-    
-    if user:
-        is_valid = verify_password(password, user["password"])
-        if is_valid:
-            request.session["user_id"] = user["id"]
-            request.session["username"] = user["username"]
-            request.session["role"] = user["role"]
-            return RedirectResponse(url="/dashboard", status_code=303)
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        
+        if user:
+            is_valid = verify_password(password, user["password"])
+            if is_valid:
+                request.session["user_id"] = user["id"]
+                request.session["username"] = user["username"]
+                request.session["role"] = user["role"]
+                return RedirectResponse(url="/dashboard", status_code=303)
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        conn.close()
     
     return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid login", "url_for": fastapi_url_for_compat(request)})
 
@@ -50,11 +54,13 @@ async def register_handler(request: Request, username: str = Form(...), email: s
         hashed = hash_password(password)
         cursor.execute("INSERT INTO users (username, password, email, role) VALUES (%s, %s, %s, %s)", (username, hashed, email, "user"))
         conn.commit()
-        cursor.close(); conn.close()
         return RedirectResponse(url="/login", status_code=303)
     except Exception as e:
         print(f"Register Error: {e}")
         return templates.TemplateResponse("register.html", {"request": request, "error_message": "Registration failed.", "url_for": fastapi_url_for_compat(request)})
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        conn.close()
 
 @router.get("/logout")
 async def logout(request: Request):
