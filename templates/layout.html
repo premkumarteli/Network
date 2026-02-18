@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NetVisor | Cyber Security</title>
+
+    <!-- Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Remix Icon -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css"
+      rel="stylesheet"
+    />
+
+    <!-- Custom CSS -->
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}?v=3"
+    />
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.1/socket.io.js"></script>
+  </head>
+
+  <body>
+    <canvas id="particle-canvas"></canvas>
+
+    <div class="app-container">
+      <!-- Glass Sidebar -->
+      <nav class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <div class="logo" style="color: var(--primary)">
+            <i class="ri-radar-line"></i>
+            <span class="brand-name">NetVisor</span>
+          </div>
+          <button
+            id="sidebar-toggle"
+            onclick="toggleSidebar()"
+            style="
+              background: none;
+              border: none;
+              color: var(--text-muted);
+              cursor: pointer;
+              font-size: 1.2rem;
+            "
+          >
+            <i class="ri-arrow-left-s-line" id="sidebar-toggle-icon"></i>
+          </button>
+        </div>
+
+        <div class="nav-links">
+          <a
+            href="{{ url_for('dashboard_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'dashboard_page' %}active{% endif %}"
+          >
+            <i class="ri-dashboard-3-line"></i> <span>Dashboard</span>
+          </a>
+          <a
+            href="{{ url_for('devices_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'devices_page' %}active{% endif %}"
+          >
+            <i class="ri-macbook-line"></i> <span>Devices</span>
+          </a>
+          <a
+            href="{{ url_for('activity_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'activity_page' %}active{% endif %}"
+          >
+            <i class="ri-pulse-line"></i> <span>Live Traffic</span>
+          </a>
+          <a
+            href="{{ url_for('vpn_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'vpn_page' %}active{% endif %}"
+          >
+            <i class="ri-shield-flash-line"></i> <span>Threats</span>
+          </a>
+          <a
+            href="{{ url_for('settings_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'settings_page' %}active{% endif %}"
+          >
+            <i class="ri-settings-4-line"></i> <span>Settings</span>
+          </a>
+          <a
+            href="{{ url_for('logs_page') }}"
+            class="nav-link {% if request.scope.get('route').name == 'logs_page' %}active{% endif %}"
+          >
+            <i class="ri-history-line"></i> <span>System Logs</span>
+          </a>
+        </div>
+
+        <div style="margin-top: auto">
+          <!-- Logout moved to User Dropdown -->
+        </div>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- System Health Banner Removed -->
+        <!-- <div id="system-health-banner" ... > -->
+
+        <div class="header">
+          <div style="display: flex; align-items: center; gap: 1rem">
+            <h2 style="margin: 0">
+              {{ (request.scope.get('route').name or
+              "NetVisor").replace('_page', '').title() }}
+            </h2>
+          </div>
+          <div style="position: relative">
+            <div
+              onclick="toggleUserMenu()"
+              style="
+                display: flex;
+                gap: 1rem;
+                align-items: center;
+                cursor: pointer;
+                user-select: none;
+              "
+            >
+              <button
+                id="theme-toggle"
+                class="action-btn"
+                onclick="
+                  event.stopPropagation();
+                  toggleTheme();
+                "
+                title="Toggle Theme"
+                style="margin-right: 0.5rem"
+              >
+                <i class="ri-sun-line" id="theme-icon"></i>
+              </button>
+              <div style="text-align: right">
+                <div style="font-weight: 700; color: var(--primary)">
+                  {{ user_info.username if user_info else 'Guest' }}
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-muted)">
+                  {{ user_info.role.title() if user_info else 'Viewer' }}
+                </div>
+              </div>
+              <div
+                style="
+                  width: 40px;
+                  height: 40px;
+                  background: var(--primary);
+                  border-radius: 50%;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  color: black;
+                  font-weight: bold;
+                "
+              >
+                {{ user_info.username[0].upper() if user_info else 'G' }}
+              </div>
+            </div>
+
+            <!-- User Dropdown Menu -->
+            <div id="user-menu" class="dropdown-menu">
+              <div class="dropdown-header">
+                <span
+                  style="
+                    font-size: 0.8rem;
+                    color: var(--text-muted);
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                  "
+                  >Admin Info</span
+                >
+              </div>
+              <div class="dropdown-item">
+                <i class="ri-shield-user-line"></i>
+                <div>
+                  <strong>Role:</strong> {{ user_info.role.title() if user_info else
+                  'Viewer' }}
+                </div>
+              </div>
+              <div class="dropdown-item">
+                <!-- System Health Moved Here -->
+                <i
+                  id="dd-health-icon"
+                  class="ri-checkbox-circle-fill"
+                  style="color: var(--success)"
+                ></i>
+                <div>
+                  <strong>System:</strong>
+                  <span id="dd-health-text" style="color: var(--success)"
+                    >Operational</span
+                  >
+                </div>
+              </div>
+              <div class="dropdown-item">
+                <i class="ri-map-pin-line"></i>
+                <div><strong>IP:</strong> 127.0.0.1</div>
+              </div>
+              <div class="dropdown-item">
+                <i class="ri-time-line"></i>
+                <div><strong>Session:</strong> Active</div>
+              </div>
+              <div
+                style="
+                  border-top: 1px solid var(--glass-border);
+                  margin: 0.5rem 0;
+                "
+              ></div>
+              <a
+                href="{{ url_for('settings_page') }}"
+                class="dropdown-item link"
+              >
+                <i class="ri-settings-4-line"></i> Settings
+              </a>
+              <a
+                href="{{ url_for('logout_view') }}"
+                class="dropdown-item link"
+                style="color: var(--danger)"
+              >
+                <i class="ri-logout-box-r-line"></i> Logout
+              </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="animate-enter">{% block content %}{% endblock %}</div>
+      </main>
+    </div>
+
+    <script>
+      async function checkHealth() {
+        try {
+          const res = await fetch("/api/system-health");
+          const data = await res.json();
+
+          // Target Dropdown Elements
+          const icon = document.getElementById("dd-health-icon");
+          const text = document.getElementById("dd-health-text");
+
+          if (!icon || !text) return;
+
+          let status = data.status; // "Operational" or "High Load"
+          let color = "var(--success)";
+          let iconClass = "ri-checkbox-circle-fill";
+
+          if (status === "Operational") {
+            color = "var(--success)";
+            iconClass = "ri-checkbox-circle-fill";
+          } else if (status === "High Load") {
+            color = "#f59e0b"; // Warning/Amber
+            iconClass = "ri-cpu-line";
+          } else {
+            color = "var(--danger)";
+            iconClass = "ri-error-warning-fill";
+          }
+
+          icon.className = iconClass;
+          icon.style.color = color;
+          text.innerText = status + ` (CPU: ${data.cpu_usage}%)`;
+          text.style.color = color;
+
+          // Update Admin Dashboard Page if elements exist
+          const adminInfo = document.getElementById("adminInfo");
+          if (adminInfo) {
+            adminInfo.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; text-align: center;">
+                    <div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">CPU</div>
+                        <div style="font-size: 1.1rem; font-weight: 700;">${data.cpu_usage}%</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">RAM</div>
+                        <div style="font-size: 1.1rem; font-weight: 700;">${data.ram_usage}%</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted);">Uptime</div>
+                        <div style="font-size: 1.1rem; font-weight: 700;">${data.uptime_hours}h</div>
+                    </div>
+                </div>
+             `;
+          }
+        } catch (e) {
+          console.error("Health check failed", e);
+        }
+      }
+
+      // Check every 5s
+      setInterval(checkHealth, 5000);
+      checkHealth(); // Initial check
+    </script>
+
+    <!-- Theme Toggle Script -->
+    <script>
+      function toggleTheme() {
+        console.log("Toggle theme clicked");
+        const root = document.documentElement;
+        const icon = document.getElementById("theme-icon");
+        const isDark = !root.hasAttribute("data-theme");
+
+        if (isDark) {
+          console.log("Switching to light");
+          root.setAttribute("data-theme", "light");
+          if (icon) icon.className = "ri-moon-line";
+          localStorage.setItem("theme", "light");
+        } else {
+          console.log("Switching to dark");
+          root.removeAttribute("data-theme");
+          if (icon) icon.className = "ri-sun-line";
+          localStorage.setItem("theme", "dark");
+        }
+      }
+
+      // Init theme
+      (function () {
+        const saved = localStorage.getItem("theme");
+        console.log("Saved theme:", saved);
+        if (saved === "light") {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+
+        // Icon update waits for DOM load
+        window.addEventListener("DOMContentLoaded", () => {
+          const icon = document.getElementById("theme-icon");
+          if (saved === "light" && icon) {
+            icon.className = "ri-moon-line";
+          }
+        });
+      })();
+
+      /* User Dropdown Logic */
+      function toggleUserMenu() {
+        const menu = document.getElementById("user-menu");
+        menu.classList.toggle("active");
+      }
+
+      // Close dropdown when clicking outside
+      window.addEventListener("click", function (e) {
+        const menu = document.getElementById("user-menu");
+        const trigger = document.querySelector('[onclick="toggleUserMenu()"]');
+
+        if (menu && menu.classList.contains("active")) {
+          if (!menu.contains(e.target) && !trigger.contains(e.target)) {
+            menu.classList.remove("active");
+          }
+        }
+      });
+    </script>
+
+    <!-- Universal JS -->
+    <script src="{{ url_for('static', filename='js/Universal.js') }}"></script>
+
+    <!-- Starfield / Asteroid Background Script -->
+    <script>
+      const canvas = document.getElementById("particle-canvas");
+      const ctx = canvas.getContext("2d");
+      let width, height;
+      let stars = [];
+      let asteroids = [];
+
+      function resize() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+      }
+
+      class Star {
+        constructor() {
+          this.reset();
+          this.y = Math.random() * height; // Random start pos
+        }
+        reset() {
+          this.x = Math.random() * width;
+          this.y = -10;
+          this.z = Math.random() * 2 + 0.5; // Depth/Speed
+          this.size = Math.random() * 1.5;
+          this.opacity = Math.random() * 0.5 + 0.1;
+        }
+        update() {
+          this.y += this.z * 0.5;
+          if (this.y > height) this.reset();
+        }
+        draw() {
+          ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      class Asteroid {
+        constructor() {
+          this.reset();
+        }
+        reset() {
+          this.x = Math.random() < 0.5 ? -50 : width + 50;
+          this.y = Math.random() * height;
+          this.vx = (Math.random() - 0.5) * 2;
+          this.vy = (Math.random() - 0.5) * 2;
+          this.size = Math.random() * 2 + 1;
+          this.color =
+            Math.random() < 0.5 ? "rgba(6, 182, 212, " : "rgba(139, 92, 246, "; // Cyan or Violet
+          this.opacity = 0;
+          this.life = 0;
+          this.maxLife = Math.random() * 200 + 100;
+        }
+        update() {
+          this.x += this.vx;
+          this.y += this.vy;
+          this.life++;
+
+          // Fade in/out
+          if (this.life < 50) this.opacity += 0.01;
+          else if (this.life > this.maxLife - 50) this.opacity -= 0.01;
+
+          if (this.life > this.maxLife || this.opacity < 0) this.reset();
+        }
+        draw() {
+          ctx.shadowBlur = 15;
+          ctx.shadowColor = this.color + "1)";
+          ctx.fillStyle = this.color + this.opacity + ")";
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      function init() {
+        stars = [];
+        asteroids = [];
+        for (let i = 0; i < 150; i++) stars.push(new Star());
+        for (let i = 0; i < 15; i++) asteroids.push(new Asteroid());
+      }
+
+      function animate() {
+        ctx.clearRect(0, 0, width, height);
+
+        stars.forEach((s) => {
+          s.update();
+          s.draw();
+        });
+
+        // Draw connections between nearby asteroids
+        ctx.strokeStyle = "rgba(6, 182, 212, 0.1)";
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i < asteroids.length; i++) {
+          asteroids[i].update();
+          asteroids[i].draw();
+          for (let j = i + 1; j < asteroids.length; j++) {
+            const dx = asteroids[i].x - asteroids[j].x;
+            const dy = asteroids[i].y - asteroids[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 200) {
+              ctx.beginPath();
+              ctx.moveTo(asteroids[i].x, asteroids[i].y);
+              ctx.lineTo(asteroids[j].x, asteroids[j].y);
+              ctx.stroke();
+            }
+          }
+        }
+
+        requestAnimationFrame(animate);
+      }
+
+      window.addEventListener("resize", resize);
+      resize();
+      init();
+      animate();
+    </script>
+
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

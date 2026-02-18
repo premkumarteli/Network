@@ -1,0 +1,14 @@
+{
+  "server_url": "http://127.0.0.1:8000/api/v1/collect/packet",
+  "dedup_window": 5,
+  "log_file": "local_capture_log.csv",
+  "risk_threshold": 5,
+  "agent_id": "GATEWAY_SENSE_01",
+  "bpf_filter": "udp port 53",
+  "heartbeat_url": "http://127.0.0.1:8000/api/v1/collect/heartbeat",
+  "verbose": true,
+  "max_queue_size": 10000,
+  "batch_size": 10,
+  "sample_rate": 1.0,
+  "api_key": "soc-agent-key-2026"
+}

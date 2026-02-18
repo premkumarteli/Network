@@ -1,0 +1,26 @@
+id,timestamp,source_ip,device_name,domain,protocol,port,risk_score,entropy,severity,agent_id,dst_ip,packet_size,device_type,os_family,brand
+1,2026-02-18 17:10:49,10.31.205.96,Unknown,antigravity-unleash.goog,UDP,53,0,3.68,LOW,GATEWAY_SENSE_01,10.31.205.39,84,PC,Windows,Unknown
+2,2026-02-18 17:10:49,10.31.205.39,Unknown,antigravity-unleash.goog,UDP,58898,0,3.68,LOW,GATEWAY_SENSE_01,10.31.205.96,84,PC,Linux/Android,Unknown
+3,2026-02-18 17:10:52,10.31.205.96,Unknown,ctldl.windowsupdate.com,UDP,53,0,3.39,LOW,GATEWAY_SENSE_01,10.31.205.39,83,PC,Windows,Unknown
+4,2026-02-18 17:10:52,10.31.205.39,Unknown,ctldl.windowsupdate.com,UDP,61003,0,3.39,LOW,GATEWAY_SENSE_01,10.31.205.96,307,PC,Linux/Android,Unknown
+5,2026-02-18 17:10:58,10.31.205.96,Unknown,google.com,UDP,53,0,1.92,LOW,GATEWAY_SENSE_01,10.31.205.39,70,PC,Windows,Unknown
+6,2026-02-18 17:10:58,10.31.205.39,Unknown,google.com,UDP,49305,0,1.92,LOW,GATEWAY_SENSE_01,10.31.205.96,86,PC,Linux/Android,Unknown
+7,2026-02-18 17:11:04,10.31.205.39,Unknown,google.com,UDP,50882,0,1.92,LOW,GATEWAY_SENSE_01,10.31.205.96,98,PC,Linux/Android,Unknown
+8,2026-02-18 17:11:04,10.31.205.96,Unknown,eastus-8.in.applicationinsights.azure.com,UDP,53,0,3.3,LOW,GATEWAY_SENSE_01,10.31.205.39,101,PC,Windows,Unknown
+9,2026-02-18 17:11:04,10.31.205.39,Unknown,eastus-8.in.applicationinsights.azure.com,UDP,56054,0,3.3,LOW,GATEWAY_SENSE_01,10.31.205.96,248,PC,Linux/Android,Unknown
+10,2026-02-18 17:11:05,10.31.205.39,Unknown,eastus-8.in.applicationinsights.azure.com,UDP,52022,0,3.3,LOW,GATEWAY_SENSE_01,10.31.205.96,260,PC,Linux/Android,Unknown
+11,2026-02-18 17:11:05,10.31.205.96,Unknown,wdcp.microsoft.com,UDP,53,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.39,78,PC,Windows,Unknown
+12,2026-02-18 17:11:05,10.31.205.39,Unknown,wdcp.microsoft.com,UDP,59518,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,209,PC,Linux/Android,Unknown
+13,2026-02-18 17:11:09,10.31.205.39,Unknown,wdcp.microsoft.com,UDP,57485,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,253,PC,Linux/Android,Unknown
+14,2026-02-18 17:11:09,10.31.205.96,Unknown,v10.events.data.microsoft.com,UDP,53,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.39,89,PC,Windows,Unknown
+15,2026-02-18 17:11:09,10.31.205.39,Unknown,v10.events.data.microsoft.com,UDP,56549,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,271,PC,Linux/Android,Unknown
+16,2026-02-18 17:11:11,10.31.205.39,Unknown,v10.events.data.microsoft.com,UDP,53053,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,227,PC,Linux/Android,Unknown
+17,2026-02-18 17:11:11,10.31.205.96,Unknown,fe2cr.update.microsoft.com,UDP,53,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.39,86,PC,Windows,Unknown
+18,2026-02-18 17:11:11,10.31.205.39,Unknown,fe2cr.update.microsoft.com,UDP,62487,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,172,PC,Linux/Android,Unknown
+19,2026-02-18 17:11:19,10.31.205.39,Unknown,fe2cr.update.microsoft.com,UDP,59088,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,196,PC,Linux/Android,Unknown
+20,2026-02-18 17:11:19,10.31.205.96,Unknown,v10.events.data.microsoft.com,UDP,53,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.39,89,PC,Windows,Unknown
+21,2026-02-18 17:11:19,10.31.205.39,Unknown,v10.events.data.microsoft.com,UDP,51684,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,214,PC,Linux/Android,Unknown
+22,2026-02-18 17:11:22,10.31.205.96,Unknown,browser.events.data.microsoft.com,UDP,53,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.39,93,PC,Windows,Unknown
+23,2026-02-18 17:11:22,10.31.205.39,Unknown,browser.events.data.microsoft.com,UDP,49772,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,258,PC,Linux/Android,Unknown
+24,2026-02-18 17:11:26,10.31.205.39,Unknown,browser.events.data.microsoft.com,UDP,58892,0,2.95,LOW,GATEWAY_SENSE_01,10.31.205.96,214,PC,Linux/Android,Unknown
+25,2026-02-18 17:11:26,10.31.205.96,Unknown,antigravity-unleash.goog,UDP,53,0,3.68,LOW,GATEWAY_SENSE_01,10.31.205.39,84,PC,Windows,Unknown

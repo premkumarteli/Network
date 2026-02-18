@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+mysql-connector-python
+psutil
+jinja2
+python-multipart
+requests
+scapy
+colorama
+python-dotenv
