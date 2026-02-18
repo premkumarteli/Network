@@ -19,7 +19,7 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 class NetworkAgent:
-    def __init__(self, config_path="config.json"):
+    def __init__(self, config_path="core/config.json"):
         self.config = self._load_config(config_path)
 
         server_url = self.config.get("server_url", "http://127.0.0.1:8000/api/v1/collect/packet")
