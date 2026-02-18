@@ -338,6 +338,13 @@ def login_required(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
     return request.session.get("username")
 
+def admin_required(request: Request):
+    if "user_id" not in request.session:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if request.session.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden: Admin access required")
+    return request.session.get("username")
+
 def fetch_recent_traffic(limit=1000):
     conn = get_db_connection()
     if not conn: return []
@@ -444,7 +451,7 @@ async def api_health():
     }
 
 @app.get("/api/admin/stats")
-async def admin_stats_api(username: str = Depends(login_required)):
+async def admin_stats_api(username: str = Depends(admin_required)):
     return {
         "hostname": socket.gethostname(),
         "local_ip": socket.gethostbyname(socket.gethostname()),
@@ -455,10 +462,10 @@ async def admin_stats_api(username: str = Depends(login_required)):
     }
 
 @app.get("/api/admin/hotspot/status")
-async def hotspot_status(): return {"active": HOTSPOT_ACTIVE}
+async def hotspot_status(username: str = Depends(admin_required)): return {"active": HOTSPOT_ACTIVE}
 
 @app.post("/api/admin/hotspot")
-async def toggle_hotspot_api(data: HotspotRequest):
+async def toggle_hotspot_api(data: HotspotRequest, username: str = Depends(admin_required)):
     global HOTSPOT_ACTIVE
     HOTSPOT_ACTIVE = (data.action == 'start')
     return {"status": "success", "message": f"Hotspot {'started' if HOTSPOT_ACTIVE else 'stopped'}"}
@@ -467,13 +474,13 @@ async def toggle_hotspot_api(data: HotspotRequest):
 async def system_status_api(): return {"active": MONITORING_ACTIVE}
 
 @app.post("/api/settings/system")
-async def toggle_monitoring_api(data: SystemConfigRequest):
+async def toggle_monitoring_api(data: SystemConfigRequest, username: str = Depends(admin_required)):
     global MONITORING_ACTIVE
     MONITORING_ACTIVE = data.active
     return {"status": "success"}
 
 @app.post("/api/settings/maintenance")
-async def toggle_maintenance_api(data: SystemConfigRequest):
+async def toggle_maintenance_api(data: SystemConfigRequest, username: str = Depends(admin_required)):
     global MAINTENANCE_MODE
     MAINTENANCE_MODE = data.active
     return {"status": "success"}
@@ -484,10 +491,10 @@ async def trigger_refresh():
     return {"status": "success"}
 
 @app.post("/api/admin/restart_scanner")
-async def restart_scanner(): return {"status": "success", "message": "Scanner service restarted."}
+async def restart_scanner(username: str = Depends(admin_required)): return {"status": "success", "message": "Scanner service restarted."}
 
 @app.post("/api/admin/reset_db")
-async def reset_db_api(username: str = Depends(login_required)):
+async def reset_db_api(username: str = Depends(admin_required)):
     file = export_to_csv_task()
     success = truncate_data()
     msg = "Data reset successfully."
@@ -495,7 +502,7 @@ async def reset_db_api(username: str = Depends(login_required)):
     return {"status": "success" if success else "error", "message": msg}
 
 @app.post("/api/settings/reset")
-async def reset_settings_api(username: str = Depends(login_required)):
+async def reset_settings_api(username: str = Depends(admin_required)):
     return await reset_db_api(username)
 
 # --- FRONTEND PAGES ---
