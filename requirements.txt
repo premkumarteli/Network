@@ -1,10 +1,6 @@
-fastapi
-uvicorn
-mysql-connector-python
-psutil
-jinja2
-python-multipart
+# Existing dependencies
+flask
 requests
-scapy
-colorama
-python-dotenv
+# Added dependencies
+bcrypt
+itsdangerous
