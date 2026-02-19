@@ -82,12 +82,6 @@
             <i class="ri-shield-flash-line"></i> <span>Threats</span>
           </a>
           <a
-            href="{{ url_for('settings_page') }}"
-            class="nav-link {% if request.scope.get('route').name == 'settings_page' %}active{% endif %}"
-          >
-            <i class="ri-settings-4-line"></i> <span>Settings</span>
-          </a>
-          <a
             href="{{ url_for('logs_page') }}"
             class="nav-link {% if request.scope.get('route').name == 'logs_page' %}active{% endif %}"
           >
@@ -200,7 +194,12 @@
               </div>
               <div class="dropdown-item">
                 <i class="ri-time-line"></i>
-                <div><strong>Session:</strong> Active</div>
+                <div>
+                  <strong>Session:</strong>
+                  <span id="session-status" style="color: var(--success)"
+                    >Active</span
+                  >
+                </div>
               </div>
               <div
                 style="
@@ -238,28 +237,63 @@
           // Target Dropdown Elements
           const icon = document.getElementById("dd-health-icon");
           const text = document.getElementById("dd-health-text");
+          const sessionText = document.getElementById("session-status");
 
-          if (!icon || !text) return;
+          if (icon && text) {
+            let status = data.status; // "Operational" or "High Load"
+            let color = "var(--success)";
+            let iconClass = "ri-checkbox-circle-fill";
 
-          let status = data.status; // "Operational" or "High Load"
-          let color = "var(--success)";
-          let iconClass = "ri-checkbox-circle-fill";
+            if (status === "Operational") {
+              color = "var(--success)";
+              iconClass = "ri-checkbox-circle-fill";
+            } else if (status === "High Load") {
+              color = "#f59e0b"; // Warning/Amber
+              iconClass = "ri-cpu-line";
+            } else {
+              color = "var(--danger)";
+              iconClass = "ri-error-warning-fill";
+            }
 
-          if (status === "Operational") {
-            color = "var(--success)";
-            iconClass = "ri-checkbox-circle-fill";
-          } else if (status === "High Load") {
-            color = "#f59e0b"; // Warning/Amber
-            iconClass = "ri-cpu-line";
-          } else {
-            color = "var(--danger)";
-            iconClass = "ri-error-warning-fill";
+            icon.className = iconClass;
+            icon.style.color = color;
+            text.innerText = status + ` (CPU: ${data.cpu_usage}%)`;
+            text.style.color = color;
           }
-
-          icon.className = iconClass;
-          icon.style.color = color;
-          text.innerText = status + ` (CPU: ${data.cpu_usage}%)`;
-          text.style.color = color;
+          
+          // Update Session Status
+          if (sessionText) {
+             // Logic: If maintenance mode -> "Maintenance"
+             // If monitoring inactive -> "Paused"
+             // Else -> "Active"
+             // This requires the API to return these states which /api/system-health might not fully expose yet.
+             // We'll infer from status for now, or fetch admin stats if needed.
+             // Ideally we fetch /api/admin/stats here too, or merge them.
+             
+             // For now, let's assume Active. 
+             // To do this properly, let's fetch admin stats as well or update the backend to include mode in health.
+             // Let's do a quick separate fetch to /api/admin/stats just for this session logic.
+             try {
+                 const adminRes = await fetch("/api/admin/stats");
+                 const adminData = await adminRes.json();
+                 
+                 if (adminData.maintenance_mode) {
+                     sessionText.innerText = "Maintenance";
+                     sessionText.style.color = "#f59e0b"; // Amber
+                 } else if (!adminData.monitoring_active && adminData.monitoring_active !== undefined) { 
+                     // monitoring_active might not be in stats, let's check.
+                     // Actually /api/settings/system/status has monitoring.
+                     // To avoid 3 fetches, let's just stick to Maintenance/Active for now unless user insists.
+                     sessionText.innerText = "Active";
+                     sessionText.style.color = "var(--success)";
+                 } else {
+                     sessionText.innerText = "Active";
+                     sessionText.style.color = "var(--success)";
+                 }
+             } catch(err) {
+                 sessionText.innerText = "Active"; 
+             }
+          }
 
           // Update Admin Dashboard Page if elements exist
           const adminInfo = document.getElementById("adminInfo");

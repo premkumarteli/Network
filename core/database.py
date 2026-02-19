@@ -56,12 +56,14 @@ def init_db():
                     packet_size INT DEFAULT 0,
                     device_type VARCHAR(50) DEFAULT 'Unknown',
                     os_family VARCHAR(50) DEFAULT 'Unknown',
-                    brand VARCHAR(50) DEFAULT 'Unknown'
+                    brand VARCHAR(50) DEFAULT 'Unknown',
+                    mac_address VARCHAR(50) DEFAULT '-',
+                    identity_confidence VARCHAR(20) DEFAULT 'low'
                 )
             """)
             
             # Ensure new columns exist
-            cols = ["dst_ip", "packet_size", "device_type", "os_family", "brand"]
+            cols = ["dst_ip", "packet_size", "device_type", "os_family", "brand", "mac_address", "identity_confidence"]
             cursor.execute("DESCRIBE traffic_logs")
             existing_cols = [c[0] for c in cursor.fetchall()]
             
@@ -69,6 +71,8 @@ def init_db():
                 if col not in existing_cols:
                     if col == "packet_size":
                         cursor.execute(f"ALTER TABLE traffic_logs ADD COLUMN {col} INT DEFAULT 0")
+                    elif col == "mac_address" or col == "identity_confidence":
+                        cursor.execute(f"ALTER TABLE traffic_logs ADD COLUMN {col} VARCHAR(50) DEFAULT '-'")
                     else:
                         cursor.execute(f"ALTER TABLE traffic_logs ADD COLUMN {col} VARCHAR(50) DEFAULT 'Unknown'")
 
@@ -154,11 +158,12 @@ async def db_writer_worker():
             if conn:
                 try:
                     cursor = conn.cursor()
-                    sql = "INSERT INTO traffic_logs (timestamp, source_ip, dst_ip, device_name, domain, protocol, port, risk_score, entropy, severity, agent_id, packet_size, device_type, os_family, brand) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                    sql = "INSERT INTO traffic_logs (timestamp, source_ip, dst_ip, device_name, domain, protocol, port, risk_score, entropy, severity, agent_id, packet_size, device_type, os_family, brand, mac_address, identity_confidence) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
                     vals = [(
                         l.time, l.src_ip, l.dst_ip, l.device_name or "Unknown", l.domain, l.protocol, l.port,
                         l.risk_score, l.entropy, (l.severity or "LOW").upper(), l.agent_id, l.size,
-                        l.device_type or "Unknown", l.os_family or "Unknown", l.brand or "Unknown"
+                        l.device_type or "Unknown", l.os_family or "Unknown", l.brand or "Unknown",
+                        l.mac_address or "-", l.identity_confidence or "low"
                     ) for l in logs]
                     cursor.executemany(sql, vals)
                     conn.commit()

@@ -45,4 +45,5 @@ async def register_agent(reg: AgentRegistration, auth: bool = Depends(validate_a
 
 @router.post("/heartbeat")
 async def agent_heartbeat(hb: AgentHeartbeat, auth: bool = Depends(validate_agent_key)):
+    print(f"[<3] HEARTBEAT: {hb.agent_id} | CPU: {hb.cpu_usage}% | RAM: {hb.ram_usage}% | Inv: {hb.inventory_size}", flush=True)
     return {"status": "alive", "server_time": datetime.datetime.now().isoformat()}

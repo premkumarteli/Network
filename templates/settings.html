@@ -104,72 +104,9 @@
     </div>
   </div>
 
-  <!-- Hotspot Control -->
-  <div class="bento-card span-2">
-    <div class="card-header">
-      <span class="card-title">Hotspot Control</span>
-      <i class="ri-wifi-line card-icon"></i>
-    </div>
-    <div
-      style="
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 1rem;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        border: 1px solid var(--glass-border);
-      "
-    >
-      <div>
-        <div style="font-weight: 600; color: var(--text-main)">
-          Mobile Hotspot
-        </div>
-        <div style="font-size: 0.8rem; color: var(--text-muted)">
-          SSID: NetVisor
-        </div>
-      </div>
-      <label class="switch">
-        <input
-          type="checkbox"
-          id="hotspot-toggle"
-          onchange="toggleHotspot()"
-          title="Toggle Hotspot"
-        />
-        <span class="slider round"></span>
-      </label>
-    </div>
-
-    <!-- TShark Status REMOVED -->
-    <div class="bento-card span-2" style="margin-top: 1rem; opacity: 0.5">
-      <div class="card-header">
-        <span class="card-title">Packet Capture Engine</span>
-        <i class="ri-search-eye-line card-icon"></i>
-      </div>
-      <div
-        style="
-          padding: 0.5rem;
-          text-align: center;
-          color: var(--text-muted);
-          font-size: 0.9rem;
-        "
-      >
-        Engine Removed (Custom Build Pending)
-      </div>
-    </div>
-    <p
-      id="hotspot-msg"
-      style="
-        margin-top: 0.5rem;
-        font-size: 0.8rem;
-        color: var(--text-muted);
-        min-height: 1.2em;
-      "
-    ></p>
-  </div>
 
   <!-- System Control -->
-  <div class="bento-card span-1">
+  <div class="bento-card span-2">
     <div class="card-header">
       <span class="card-title">System Control</span>
       <i class="ri-cpu-line card-icon"></i>
@@ -473,47 +410,6 @@
   }
 
   // --- Hotspot Control ---
-  async function checkHotspotStatus() {
-    try {
-      const res = await fetch("/api/admin/hotspot/status");
-      const data = await res.json();
-      const toggle = document.getElementById("hotspot-toggle");
-      if (toggle) toggle.checked = data.active;
-    } catch (e) {
-      console.error("Hotspot status error:", e);
-    }
-  }
-
-  async function toggleHotspot() {
-    const toggle = document.getElementById("hotspot-toggle");
-    const msg = document.getElementById("hotspot-msg");
-    const action = toggle.checked ? "start" : "stop";
-
-    msg.innerText = "Processing...";
-    msg.style.color = "var(--text-muted)";
-
-    try {
-      const res = await fetch("/api/admin/hotspot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      const data = await res.json();
-
-      if (data.status === "success") {
-        msg.innerText = data.message;
-        msg.style.color = "var(--success)";
-      } else {
-        msg.innerText = "Error: " + data.message;
-        msg.style.color = "var(--danger)";
-        toggle.checked = !toggle.checked;
-      }
-    } catch (e) {
-      msg.innerText = "Network Error";
-      msg.style.color = "var(--danger)";
-      toggle.checked = !toggle.checked;
-    }
-  }
 
   // --- System Control ---
   async function checkSystemStatus() {
@@ -705,7 +601,6 @@
     updateLocalThemeUI();
 
     loadAdminStats();
-    checkHotspotStatus();
     checkSystemStatus();
     // checkTSharkStatus(); // REMOVED
     setInterval(loadAdminStats, 2000);

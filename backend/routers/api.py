@@ -53,7 +53,9 @@ async def api_activity(username: str = Depends(login_required)):
         "size": r.get("packet_size", 0),
         "device": r.get("device_name") or "Unknown",
         "os": r.get("os_family") or "Unknown",
-        "brand": r.get("brand") or "Unknown"
+        "brand": r.get("brand") or "Unknown",
+        "mac": r.get("mac_address", "-"),
+        "confidence": r.get("identity_confidence", "low")
     } for r in rows]
 
 @router.get("/devices")
@@ -64,11 +66,12 @@ async def api_devices(username: str = Depends(login_required)):
         ip = row.get("source_ip")
         if ip and ip not in devices_map:
             devices_map[ip] = {
-                "ip": ip, "mac": "-", "hostname": row.get("device_name") or "Unknown",
+                "ip": ip, "mac": row.get("mac_address", "-"), "hostname": row.get("device_name") or "Unknown",
                 "traffic": 0.1, "is_online": True, "last_seen": row.get("timestamp"),
                 "type": row.get("device_type") or "Unknown",
                 "os": row.get("os_family") or "Unknown",
-                "brand": row.get("brand") or "Unknown"
+                "brand": row.get("brand") or "Unknown",
+                "confidence": row.get("identity_confidence", "low")
             }
     return list(devices_map.values())
 

@@ -17,6 +17,8 @@ class PacketLog(BaseModel):
     device_type: Optional[str] = "Unknown"
     os_family: Optional[str] = "Unknown"
     brand: Optional[str] = "Unknown"
+    mac_address: Optional[str] = "-"
+    identity_confidence: Optional[str] = "low"
 
 class HotspotRequest(BaseModel):
     action: str
@@ -36,3 +38,6 @@ class AgentHeartbeat(BaseModel):
     status: str
     dropped_packets: int
     time: str
+    cpu_usage: Optional[float] = 0.0
+    ram_usage: Optional[float] = 0.0
+    inventory_size: Optional[int] = 0
