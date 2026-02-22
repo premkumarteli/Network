@@ -9,6 +9,5 @@
   "verbose": true,
   "max_queue_size": 10000,
   "batch_size": 10,
-  "sample_rate": 1.0,
-  "api_key": "soc-agent-key-2026"
+  "sample_rate": 1.0
 }

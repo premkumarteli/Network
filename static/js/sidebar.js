@@ -1,1 +1,0 @@
-const sidebar=document.getElementById('sidebar');const btn=document.getElementById('toggleBtn');if(btn){btn.addEventListener('click',()=>{sidebar.classList.toggle('collapsed');document.getElementById('main-content').classList.toggle('shifted');});}

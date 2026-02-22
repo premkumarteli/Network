@@ -20,8 +20,16 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 from scapy.all import sniff, IP, DNS, DNSQR, UDP, TCP, Ether
 from colorama import Fore, Style, init
+import logging
 
-init(autoreset=True)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Add parent directory to sys.path to allow importing modules from root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# from services.detector import AnomalyDetector
 
 # =========================================================
 # THREAD SAFE DEVICE INVENTORY (PERSISTENT)
@@ -33,6 +41,8 @@ class DeviceInventory:
         self.storage_file = storage_file
         self.devices = {}
         self.load_inventory()
+        # Start background save worker (Performance Fix)
+        threading.Thread(target=self._auto_save_worker, daemon=True).start()
 
     def load_inventory(self):
         if os.path.exists(self.storage_file):
@@ -43,10 +53,17 @@ class DeviceInventory:
             except:
                 pass
 
+    def _auto_save_worker(self):
+        """Batched save every 30 seconds to reduce I/O"""
+        while True:
+            time.sleep(30)
+            self.save_inventory()
+
     def save_inventory(self):
         try:
-            with open(self.storage_file, "w") as f:
-                json.dump(self.devices, f)
+            with self.lock: # Ensure thread safety during dump
+                with open(self.storage_file, "w") as f:
+                    json.dump(self.devices, f)
         except:
             pass
 
@@ -68,11 +85,11 @@ class DeviceInventory:
                     self.devices[ip][k] = v
 
             self.devices[ip]["last_seen"] = time.time()
-            self.save_inventory()
+            # Removed direct save_inventory() call for performance
 
     def get(self, ip):
-        with self.lock:
-            return self.devices.get(ip)
+        return self.devices.get(ip)
+
 
 # =========================================================
 # MAIN AGENT
@@ -92,10 +109,18 @@ class NetworkAgent:
         self.server_url = base + "/api/v1/collect/packet"
         self.batch_url = base + "/api/v1/collect/batch"
         self.heartbeat_url = base + "/api/v1/collect/heartbeat"
+        self.policy_url = base + "/api/v1/policy"
 
-        self.agent_id = self.config.get("agent_id", "GATEWAY_SENSE_01")
-        self.api_key = self.config.get("api_key", "soc-agent-key-2026")
+        self.agent_id = self._init_agent_id()
+        self.organization_id = self.config.get("organization_id", "default-org-id") # Should be provided in config
+        self.api_key = os.getenv("AGENT_API_KEY") or self.config.get("api_key", "soc-agent-key-2026")
         self.headers = {"X-API-Key": self.api_key}
+
+        self.policy = {
+            "blocked_domains": [],
+            "vpn_restriction": False,
+            "alert_threshold": 70
+        }
 
         self.batch_size = 10
         self.max_q = 10000
@@ -105,7 +130,7 @@ class NetworkAgent:
         self.remote_active = True
         self.verbose = True
         self.dropped_packets = 0
-
+        
         self.device_inventory = DeviceInventory()
         self.probing_ips = set()
         
@@ -118,33 +143,59 @@ class NetworkAgent:
             "F0:9F:C2": "Ubiquiti", "00:11:32": "Synology"
         }
 
-        # Risk Analysis State
-        self.risk_threshold = 20
-        self.start_time = time.time()
-        self.ip_counts = collections.defaultdict(int)
-        self.nx_counts = collections.defaultdict(int)
-        self.unique_domains = collections.defaultdict(set)
-        self.counter_lock = threading.Lock()
+        # Risk Analysis Engine (ML-Enhanced)
+        # self.detector = AnomalyDetector(risk_threshold=20)
         
         # Deduplication
         self.dedup_lock = threading.Lock()
         self.recent_queries = {}
         self.dedup_window = 5
-
+        
+        # Cleanup Worker
+        # Queues and Thread Pools
         self.upload_q = queue.Queue(maxsize=self.max_q)
         self.log_q = queue.Queue(maxsize=self.max_q)
-        
-        # NetBIOS Thread Pool
         self.discovery_pool = ThreadPoolExecutor(max_workers=10)
 
-        signal.signal(signal.SIGINT, self.stop)
-
+        # Start Workers
+        threading.Thread(target=self._dedup_cleanup, daemon=True).start()
         threading.Thread(target=self._upload_worker, daemon=True).start()
         threading.Thread(target=self._heartbeat_worker, daemon=True).start()
         threading.Thread(target=self._discovery_engine, daemon=True).start()
         threading.Thread(target=self._log_worker, daemon=True).start()
         
         self._register_agent()
+
+    def _dedup_cleanup(self):
+        while self.is_running:
+            time.sleep(60)
+            try:
+                cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.dedup_window)
+                with self.dedup_lock:
+                    # Prune old entries
+                    keys_to_del = [k for k, v in self.recent_queries.items() if v < cutoff]
+                    for k in keys_to_del:
+                        del self.recent_queries[k]
+            except:
+                pass
+
+    def _init_agent_id(self):
+        """Ensures a persistent unique Agent ID"""
+        id_file = "agent_id.txt"
+        if os.path.exists(id_file):
+            with open(id_file, "r") as f:
+                return f.read().strip()
+        
+        # If not exists, check config
+        cid = self.config.get("agent_id")
+        if cid and cid != "GATEWAY_SENSE_01":
+            return cid
+            
+        # Generate new one
+        new_id = f"AGENT-{uuid.uuid4().hex[:8].upper()}"
+        with open(id_file, "w") as f:
+            f.write(new_id)
+        return new_id
 
     def _load_config(self, path):
         try:
@@ -156,17 +207,29 @@ class NetworkAgent:
         return {}
 
     def _register_agent(self):
-        try:
-            payload = {
-                "agent_id": self.agent_id,
-                "hostname": socket.gethostname(),
-                "os": platform.system(),
-                "version": "v2.1-enterprise"
-            }
-            requests.post(self.server_url.replace("/packet", "/register"), json=payload, headers=self.headers, timeout=2)
-            print(f"{Fore.GREEN}[+] Enterprise Agent Registered")
-        except:
-            pass
+        retry_delay = 1
+        while self.is_running:
+            try:
+                payload = {
+                    "agent_id": self.agent_id,
+                    "hostname": socket.gethostname(),
+                    "os": platform.system(),
+                    "version": "v2.2-professional",
+                    "time": datetime.now().isoformat(),
+                    "organization_id": self.organization_id
+                }
+                r = requests.post(self.server_url.replace("/packet", "/register"), json=payload, headers=self.headers, timeout=2)
+                r.raise_for_status()
+                res = r.json()
+                if res.get("organization_id"):
+                    self.organization_id = res["organization_id"]
+                    logger.info(f"Agent synced with Organization: {self.organization_id}")
+                print(f"{Fore.GREEN}[+] Professional Agent Registered Successfully")
+                return
+            except Exception as e:
+                logger.warning(f"Registration failed: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 30)
 
     # ======================== UTILS ==========================
 
@@ -191,48 +254,7 @@ class NetworkAgent:
         if "vmware" in vendor or "oracle" in vendor: return "Virtual Machine"
         return "Unknown"
 
-    def calculate_entropy(self, data):
-        if not data: return 0
-        counter = collections.Counter(data)
-        total = len(data)
-        return -sum((count/total) * math.log2(count/total) for count in counter.values())
 
-    def get_risk_score(self, domain, src_ip, rcode=0):
-        score = 0
-        parts = domain.split('.')
-        longest_part = max(parts, key=len) if parts else domain
-        
-        if len(longest_part) > 25: score += 2
-        if sum(c.isdigit() for c in longest_part) > 5: score += 2
-        
-        ent = self.calculate_entropy(longest_part)
-        if ent > 4.6: score += 3
-        
-        with self.counter_lock:
-            if rcode != 0:
-                self.nx_counts[src_ip] += 1
-                if self.nx_counts[src_ip] > 20: score += 2
-
-            self.ip_counts[src_ip] += 1
-            self.unique_domains[src_ip].add(domain)
-            if len(self.unique_domains[src_ip]) > 50: score += 3
-            
-            elapsed = time.time() - self.start_time
-            if elapsed > 300:
-                self.ip_counts.clear()
-                self.nx_counts.clear()
-                self.unique_domains.clear()
-                self.start_time = time.time()
-                elapsed = 0.1
-                
-            rate = self.ip_counts[src_ip] / (max(elapsed, 1) / 60)
-            if rate > 200: score += 2
-            
-        severity = "LOW"
-        if score >= self.risk_threshold: severity = "HIGH"
-        elif score >= max(1, self.risk_threshold // 2): severity = "MEDIUM"
-            
-        return score, ent, severity
 
     # ======================== DISCOVERY ======================
 
@@ -281,7 +303,7 @@ class NetworkAgent:
                     arp_map[ip] = mac
                     
         except Exception as e:
-            pass # Silent fail in production
+            logger.debug(f"ARP parse error: {e}")
             
         return arp_map
 
@@ -316,6 +338,9 @@ class NetworkAgent:
     # ======================== WORKERS ========================
 
     def get_device_label(self, ip, is_local_ip=False, is_response=False):
+        if not hasattr(self, 'device_inventory'):
+             return f"{Style.DIM}{ip}{Style.RESET_ALL}"
+             
         dev = self.device_inventory.get(ip)
         if dev and dev["hostname"] != "Unknown":
             label = dev["hostname"]
@@ -331,11 +356,20 @@ class NetworkAgent:
 
     def process_packet(self, packet):
         if not self.remote_active: return
+
+        # DEBUG: Print dot for every packet to verify capture
+        print(".", end="", flush=True) 
+                
         try:
+            # Check for candidate DNS packets that are being missed
+            # if packet.haslayer(UDP) and (packet[UDP].sport == 53 or packet[UDP].dport == 53):
+            #    if not packet.haslayer(DNS):
+            #        print(f"UDP 53: {packet.summary()}")
+            
             if packet.haslayer(DNS) and packet.haslayer(IP) and packet.haslayer(DNSQR):
-                if random.random() > 0.5: # 50% Sampling for performance
-                    pass # Or return
-                    
+                # Sampling logic removed or fixed
+                # if random.random() > 0.5: return 
+
                 now_utc = datetime.now(timezone.utc)
                 src_ip = packet[IP].src
                 dst_ip = packet[IP].dst
@@ -345,6 +379,12 @@ class NetworkAgent:
                 except: return
 
                 if not domain or len(domain) > 255: return
+                
+                # Policy Enforcement: Blocked Domains
+                if domain in self.policy.get("blocked_domains", []):
+                    if self.verbose:
+                        print(f"{Fore.RED}[BLOCK]{Style.RESET_ALL} Prevented access to {domain}")
+                    return
 
                 port = 53
                 proto = "UDP"
@@ -361,9 +401,12 @@ class NetworkAgent:
                 ttl = packet[IP].ttl
                 os_family = self.detect_os(ttl)
                 
-                device = self.device_inventory.get(src_ip)
+                # Device Inventory (Disabled for now to prevent crash)
+                # device = self.device_inventory.get(src_ip)
+                device = None
+                
                 if not device:
-                    self._async_enrich(src_ip)
+                    # self._async_enrich(src_ip)
                     mac, vendor, name, conf = "-", "Unknown", "Unknown", "low"
                     d_type = self.detect_device_type(os_family, vendor, [domain])
                 else:
@@ -377,10 +420,14 @@ class NetworkAgent:
                 potential_name = None
                 if domain.endswith(".local") or ".nbns" in domain:
                     potential_name = domain.split('.')[0].upper()
-                    self.device_inventory.update(src_ip, hostname=potential_name, confidence="high")
+                    # self.device_inventory.update(src_ip, hostname=potential_name, confidence="high")
 
                 name = potential_name or name
-                risk_score, entropy_val, severity = self.get_risk_score(domain, src_ip, 0) # rcode 0 for query
+                
+                # ML-Enhanced Analysis (Disabled)
+                # risk_score, entropy_val, severity, ml_prob = self.detector.analyze_packet(domain, src_ip, 0)
+                risk_score, entropy_val, severity, ml_prob = 0, 0.0, "LOW", 0.0
+
                 risk_label = f"{Fore.RED}[{severity}]{Style.RESET_ALL}" if severity != "LOW" else ""
 
                 record = {
@@ -399,7 +446,8 @@ class NetworkAgent:
                     "os_family": os_family,
                     "brand": vendor,
                     "mac_address": mac,
-                    "identity_confidence": conf
+                    "identity_confidence": conf,
+                    "organization_id": self.organization_id
                 }
                 
                 # Queueing
@@ -417,31 +465,42 @@ class NetworkAgent:
                     print(out)
 
         except Exception as e:
-            pass
+            logger.error(f"Packet processing error: {e}")
 
     def _upload_worker(self):
         batch = []
         last_send = time.time()
+        retry_delay = 1  # Start with 1s delay
+        
         while self.is_running:
             try:
-                record = self.upload_q.get(timeout=1)
+                # Optimized: Reduce timeout to avoid blocking too long if queue is empty
+                record = self.upload_q.get(timeout=0.5)
                 batch.append(record)
                 self.upload_q.task_done()
-            except queue.Empty: pass
+            except queue.Empty: 
+                pass
             
+            # Condition to send: Batch full OR time elapsed (and batch has data)
             if len(batch) >= self.batch_size or (time.time() - last_send > 2 and batch):
                 try:
                     r = requests.post(self.batch_url, json=batch, headers=self.headers, timeout=2.0)
                     r.raise_for_status()
+                    
+                    # Success: Reset batch and retry delay
                     batch = []
                     last_send = time.time()
-                except:
-                    for r in batch: self.upload(r) # Fallback
-                    batch = []
+                    retry_delay = 1 
+                except Exception as e:
+                    # Failure: Exponential Backoff
+                    print(f"Upload failed: {e}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 60) # Max 60s wait
+                    # Keep batch to retry next loop
 
     def upload(self, record):
         try: requests.post(self.server_url, json=record, headers=self.headers, timeout=1.0)
-        except: pass
+        except Exception as e: logger.error(f"Single upload failed: {e}")
 
     def _heartbeat_worker(self):
         while self.is_running:
@@ -456,11 +515,31 @@ class NetworkAgent:
                     "dropped_packets": self.dropped_packets,
                     "cpu_usage": cpu,
                     "ram_usage": ram,
-                    "inventory_size": len(self.device_inventory.devices)
+                    "inventory_size": len(self.device_inventory.devices),
+                    "time": datetime.now().isoformat()
                 }
-                requests.post(self.heartbeat_url, json=payload, headers=self.headers, timeout=1)
-            except: pass
+                r = requests.post(self.heartbeat_url, json=payload, headers=self.headers, timeout=2)
+                r.raise_for_status()
+                logger.debug("Heartbeat sent successfully")
+                
+                # Periodic Policy Fetch
+                self._fetch_policy()
+            except Exception as e: 
+                logger.warning(f"Heartbeat/Policy fetch failed: {e}")
+            
+            # Use adaptive sleep or fixed interval
             time.sleep(30)
+
+    def _fetch_policy(self):
+        try:
+            r = requests.get(f"{self.policy_url}/{self.organization_id}", headers=self.headers, timeout=2)
+            if r.status_code == 200:
+                new_policy = r.json()
+                if new_policy != self.policy:
+                    self.policy = new_policy
+                    print(f"{Fore.CYAN}[+] Policy Updated: {len(self.policy.get('blocked_domains', []))} blocked domains")
+        except:
+            pass
             
     def _log_worker(self):
         log_file = "local_capture_log.csv"
@@ -480,7 +559,8 @@ class NetworkAgent:
                         writer.writerows(buffer)
                     buffer = []
                     last_flush = time.time()
-                except: pass
+                except Exception as e:
+                    logger.error(f"Log flush failed: {e}")
 
     def stop(self, signum=None, frame=None):
         print(f"\n{Fore.YELLOW}[!] Shutting down Enterprise Agent...")
@@ -490,7 +570,13 @@ class NetworkAgent:
         sys.exit(0)
 
     def start(self):
+        from scapy.all import conf
+        print(f"{Fore.CYAN}[*] Available Interfaces:")
+        print(conf.iface)
+        
         print(f"{Fore.BLUE}{'='*80}\n   ELITE SOC AGENT: ENTERPRISE EDITION | Filter: {self.bpf_filter}\n{'='*80}")
+        print(f"{Fore.GREEN}[*] Sniffing started... Generate DNS traffic to see output.")
+        # Try without BPF filter first to debug VLAN issues
         sniff(filter=self.bpf_filter, prn=self.process_packet, store=False, promisc=True)
 
 if __name__ == "__main__":

@@ -1,8 +1,0 @@
-flask
-mysql-connector-python
-psutil
-fpdf
-scikit-learn
-pandas
-numpy
-joblib

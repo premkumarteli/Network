@@ -8,3 +8,6 @@ requests
 scapy
 colorama
 python-dotenv
+scikit-learn
+numpy
+python-socketio

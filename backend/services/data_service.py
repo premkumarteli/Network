@@ -1,48 +1,23 @@
-from core.database import get_db_connection
-import csv
-import os
+from core.database import (
+    db_fetch_recent_traffic, db_fetch_system_logs, db_fetch_vpn_alerts,
+    db_truncate_tables, db_export_to_csv
+)
 import datetime
+import time
 from collections import Counter
 
+# --- In-Memory Cache for Dashboard Stats ---
+_cache = {
+    "stats": None,
+    "expiry": 0
+}
+CACHE_TTL = 5  # 5 seconds TTL for high-traffic dashboard stats
+
 def export_to_csv_task():
-    """Helper to dump DB to CSV."""
-    if not os.path.exists("data/backups"):
-        os.makedirs("data/backups")
-    conn = get_db_connection()
-    if not conn: return None
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM traffic_logs")
-        rows = cursor.fetchall()
-        if not rows: return "empty"
-        
-        filename = f"data/backups/traffic_export_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        with open(filename, 'w', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=rows[0].keys())
-            writer.writeheader()
-            writer.writerows(rows)
-        return filename
-    except Exception as e:
-        print(f"Export error: {e}")
-        return None
-    finally:
-        if conn: conn.close()
+    return db_export_to_csv()
 
 def truncate_data():
-    """Wipe traffic and activity logs."""
-    conn = get_db_connection()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("TRUNCATE TABLE traffic_logs")
-            cursor.execute("TRUNCATE TABLE activity_logs")
-            conn.commit()
-            return True
-        except Exception as e:
-            print(f"Truncate error: {e}")
-        finally:
-            conn.close()
-    return False
+    return db_truncate_tables()
 
 def parse_timestamp(value) -> datetime.datetime:
     if isinstance(value, datetime.datetime):
@@ -51,31 +26,46 @@ def parse_timestamp(value) -> datetime.datetime:
         return value
     return datetime.datetime.now(datetime.timezone.utc)
 
-def fetch_recent_traffic(limit=1000):
-    conn = get_db_connection()
-    if not conn: return []
-    try:
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM traffic_logs ORDER BY id DESC LIMIT %s", (limit,))
-        rows = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return rows
-    except: return []
+def fetch_recent_traffic(limit=1000, severity=None, organization_id=None):
+    return db_fetch_recent_traffic(limit, severity, organization_id)
 
-def get_stats():
-    rows = fetch_recent_traffic(limit=1200)
+def fetch_system_logs(limit=50, organization_id=None):
+    return db_fetch_system_logs(limit, organization_id)
+
+def fetch_vpn_alerts(limit=50, organization_id=None):
+    return db_fetch_vpn_alerts(limit, organization_id)
+
+def fetch_device_risks(organization_id=None):
+    from core.database import db_fetch_device_risks
+    return db_fetch_device_risks(organization_id)
+
+def get_stats(organization_id=None):
+    global _cache
+    now_ts = time.time()
+    
+    # Simple multi-tenant cache key
+    cache_key = f"stats_{organization_id or 'global'}"
+    
+    if _cache.get(cache_key) and now_ts < _cache.get(f"{cache_key}_expiry", 0):
+        return _cache[cache_key]
+        
+    rows = db_fetch_recent_traffic(limit=1200, organization_id=organization_id)
     protocol_counts = Counter()
     devices = {row.get("source_ip") for row in rows if row.get("source_ip")}
     recent_count = 0
     now = datetime.datetime.now(datetime.timezone.utc)
+    
     for row in rows:
         protocol_counts[row.get("protocol") or "DNS"] += 1
-        if (now - parse_timestamp(row.get("timestamp"))).total_seconds() <= 60:
+        ts = parse_timestamp(row.get("timestamp"))
+        if (now - ts).total_seconds() <= 60:
             recent_count += 1
+            
     total_mb = sum(row.get("packet_size", 0) for row in rows) / (1024*1024)
-    if total_mb == 0 and rows: total_mb = len(rows) * 0.05
-    return {
+    if total_mb == 0 and rows: 
+        total_mb = len(rows) * 0.05
+        
+    stats = {
         "bandwidth": f"{total_mb:.2f} MB",
         "devices": len(devices),
         "vpn_alerts": len([r for r in rows if r.get("severity") == "HIGH"]),
@@ -83,3 +73,9 @@ def get_stats():
         "upload_speed": recent_count * 2,
         "download_speed": recent_count * 5
     }
+    
+    # Update Cache
+    _cache[cache_key] = stats
+    _cache[f"{cache_key}_expiry"] = now_ts + CACHE_TTL
+    
+    return stats
