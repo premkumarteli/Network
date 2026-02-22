@@ -1,13 +1,15 @@
-fastapi
-uvicorn
-mysql-connector-python
-psutil
-jinja2
-python-multipart
+# Existing dependencies
+flask
 requests
+<<<<<<< HEAD
 scapy
 colorama
 python-dotenv
 scikit-learn
 numpy
 python-socketio
+=======
+# Added dependencies
+bcrypt
+itsdangerous
+>>>>>>> aeeb3bbd0fd58295a9ac58d6a42cf4537904a626
