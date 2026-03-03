@@ -17,7 +17,7 @@ const ActivityLog = ({ logs }) => {
         <tbody>
           {logs.length === 0 ? (
             <tr>
-              <td colspan="5" className="empty-state">Listening for traffic...</td>
+              <td colSpan="5" className="empty-state">Listening for traffic...</td>
             </tr>
           ) : (
             logs.map((log, index) => (

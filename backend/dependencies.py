@@ -1,5 +1,4 @@
 from fastapi import Request, HTTPException, Depends, status
-from core.database import get_db_connection
 import logging
 import time
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { systemService } from '../services/api';
 import DeviceTable from '../components/Devices/DeviceTable';
 
 const DevicesPage = () => {
@@ -11,8 +11,9 @@ const DevicesPage = () => {
     }, []);
 
     const fetchDevices = async () => {
+        setLoading(true);
         try {
-            const res = await axios.get('/api/devices');
+            const res = await systemService.getDevices();
             setDevices(res.data);
             setLoading(false);
         } catch (err) {
@@ -27,6 +28,7 @@ const DevicesPage = () => {
                 <h2>Network Devices</h2>
                 <div style={{ display: 'flex', gap: '1rem' }}>
                     <button className="action-btn" onClick={fetchDevices}>
+
                         <i className="ri-refresh-line"></i> Refresh
                     </button>
                 </div>

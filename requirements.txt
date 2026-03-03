@@ -1,15 +1,19 @@
 # Existing dependencies
 flask
 requests
-<<<<<<< HEAD
 scapy
 colorama
 python-dotenv
 scikit-learn
 numpy
 python-socketio
-=======
-# Added dependencies
 bcrypt
 itsdangerous
->>>>>>> aeeb3bbd0fd58295a9ac58d6a42cf4537904a626
+mysql-connector-python
+fastapi
+uvicorn
+psutil
+PyJWT
+pydantic
+python-multipart
+cryptography

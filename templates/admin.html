@@ -1,0 +1,14 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Admin</h1>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="card p-4" id="adminInfo">Loading admin info...</div>
+  <div class="card p-4">
+    <h3>Admin Bandwidth (KB/s)</h3>
+    <div id="adminSpeeds" class="text-lg mt-2"></div>
+  </div>
+</div>
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}
+{% endblock %}

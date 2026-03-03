@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import ThreatTable from '../components/Threats/ThreatTable'; // Reusing table or creating a generic one
+import { systemService } from '../services/api';
+import ThreatTable from '../components/Threats/ThreatTable'; 
 
 const ActivityPage = () => {
     const [traffic, setTraffic] = useState([]);
@@ -14,7 +14,8 @@ const ActivityPage = () => {
 
     const fetchTraffic = async () => {
         try {
-            const res = await axios.get('/api/activity');
+            // Using getAlerts as a placeholder for live traffic since we don't have a dedicated live traffic endpoint yet
+            const res = await systemService.getAlerts();
             setTraffic(res.data);
             setLoading(false);
         } catch (err) {
@@ -50,16 +51,16 @@ const ActivityPage = () => {
                         <tbody>
                         {traffic.map((t, index) => (
                             <tr key={index} className="animate-fade">
-                                <td className="mono muted">{t.time.split(" ")[1]}</td>
-                                <td className="mono primary">{t.ip}</td>
-                                <td>{t.domain !== "-" ? t.domain : t.dst_ip}</td>
-                                <td><span className="badge neutral">{t.protocol}</span></td>
+                                <td className="mono muted">{t.timestamp || "N/A"}</td>
+                                <td className="mono primary">{t.device_ip || t.src_ip}</td>
+                                <td>{t.breakdown?.domain || "-"}</td>
+                                <td><span className="badge neutral">TCP/UDP</span></td>
                                 <td>
-                                    <span className={`badge ${t.severity === 'HIGH' ? 'danger' : t.severity === 'MEDIUM' ? 'warning' : 'success'}`}>
+                                    <span className={`badge ${t.severity === 'CRITICAL' || t.severity === 'HIGH' ? 'danger' : t.severity === 'MEDIUM' ? 'warning' : 'success'}`}>
                                         {t.severity || 'LOW'}
                                     </span>
                                 </td>
-                                <td className="mono">{t.size} B</td>
+                                <td className="mono">{t.risk_score || "0"}</td>
                             </tr>
                         ))}
                         </tbody>

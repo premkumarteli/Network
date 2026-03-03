@@ -5,7 +5,6 @@ import numpy as np
 import threading
 from collections import Counter
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.exceptions import NotFittedError
 
 class DNSThreatClassifier:
     def __init__(self, model_path="services/ml/models/dns_threat_model.pkl"):
@@ -115,7 +114,7 @@ class DNSThreatClassifier:
             with self.lock:
                 prob = self.model.predict_proba(features)[0][1] # Probability of class 1 (Malicious)
             return prob
-        except Exception as e:
+        except Exception:
             # print(f"Prediction Error: {e}")
             return 0.0
 

@@ -24,9 +24,9 @@ logger = logging.getLogger("netvisor")
 # --- Socket.IO Server ---
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
-from core.database import init_db, db_writer_worker
+from core.database import init_db, db_writer_worker, flow_db_writer_worker
 from .config import SECRET_KEY
-from .routers import auth, collect, api, policy
+from .routers import auth, collect, api, policy, intelligence
 from core.state import state
 
 # --- Global Exception Handler ---
@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI):
     state.start_time = time.time()
     init_db()
     asyncio.create_task(db_writer_worker())
+    asyncio.create_task(flow_db_writer_worker())
     
     # Start periodic baseline computation (every 1 hour)
     async def baseline_timer():
@@ -82,10 +83,13 @@ app = FastAPI(
     exception_handlers={Exception: global_exception_handler}
 )
 
-# --- CORS Hardening ---
+# --- CORS Config ---
+# For credentials (cookies/sessions) to work via IP, we cannot use wildcard origins ["*"]
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+    allow_origin_regex=r"https?://.*", # Allow any origin for local dev ease, while supporting credentials
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -121,6 +125,7 @@ app.mount("/assets", StaticFiles(directory="frontend/dist/assets"), name="assets
 app.include_router(auth.router)
 app.include_router(collect.router)
 app.include_router(policy.router)
+app.include_router(intelligence.router)
 app.include_router(api.router, prefix="/api")
 
 

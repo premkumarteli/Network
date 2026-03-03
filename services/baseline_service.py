@@ -1,6 +1,7 @@
 from core.database import get_db_connection
-import datetime
-import json
+import logging
+
+logger = logging.getLogger("netvisor.baseline")
 
 class BaselineService:
     def __init__(self):
@@ -8,7 +9,8 @@ class BaselineService:
 
     def compute_all_baselines(self):
         """
-        Computes baselines for all active devices based on the last 24 hours of traffic.
+        Phase 2 & 3: Computes baselines based on flow data from the last 24 hours.
+        Updated for hybrid flow architecture.
         """
         conn = get_db_connection()
         if not conn: return
@@ -16,19 +18,23 @@ class BaselineService:
         try:
             cursor = conn.cursor(dictionary=True)
             
-            # 1. Identify active devices and calculate averages
-            # We look at: Avg Packets per Minute, Avg Unique Domains per Hour
+            # 1. Use flow_logs to calculate behavioral averages
+            # - avg_connections_per_min (Total flows / 1440 mins)
+            # - avg_unique_destinations (Unique dst_ips)
+            # - avg_flow_duration (Average of duration field)
+            # - std_dev_connections (Using variance/stddev SQL functions)
+            
             cursor.execute("""
                 SELECT 
-                    mac_address, 
+                    device_ip, 
                     organization_id,
-                    COUNT(*) / (24 * 60) as avg_packet_rate,
-                    COUNT(DISTINCT domain) / 24 as avg_dns_per_hour,
-                    COUNT(DISTINCT port) as avg_ports_used
-                FROM traffic_logs
-                WHERE timestamp > (NOW() - INTERVAL 1 DAY)
-                AND mac_address != '-'
-                GROUP BY mac_address, organization_id
+                    COUNT(*) / (24 * 60) as avg_conn_rate,
+                    COUNT(DISTINCT dst_ip) as unique_dsts,
+                    AVG(duration) as avg_dur,
+                    STDDEV(duration) as std_dev_dur
+                FROM flow_logs
+                WHERE last_seen > (NOW() - INTERVAL 1 DAY)
+                GROUP BY device_ip, organization_id
             """)
             
             baselines = cursor.fetchall()
@@ -36,20 +42,33 @@ class BaselineService:
             for b in baselines:
                 # 2. Update or Insert into device_baselines
                 cursor.execute("""
-                    INSERT INTO device_baselines (device_id, organization_id, avg_packet_rate, avg_dns_per_hour, avg_ports_used, last_computed)
-                    VALUES (%s, %s, %s, %s, %s, NOW())
+                    INSERT INTO device_baselines (
+                        device_id, organization_id, ip_address, 
+                        avg_connections_per_min, avg_unique_destinations, 
+                        avg_flow_duration, std_dev_connections, 
+                        last_computed
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                     ON DUPLICATE KEY UPDATE
-                        avg_packet_rate = VALUES(avg_packet_rate),
-                        avg_dns_per_hour = VALUES(avg_dns_per_hour),
-                        avg_ports_used = VALUES(avg_ports_used),
+                        avg_connections_per_min = VALUES(avg_connections_per_min),
+                        avg_unique_destinations = VALUES(avg_unique_destinations),
+                        avg_flow_duration = VALUES(avg_flow_duration),
+                        std_dev_connections = VALUES(std_dev_connections),
+                        ip_address = VALUES(ip_address),
                         last_computed = NOW()
-                """, (b['mac_address'], b['organization_id'], b['avg_packet_rate'], b['avg_dns_per_hour'], b['avg_ports_used']))
+                """, (
+                    b['device_ip'], b['organization_id'], b['device_ip'],
+                    b['avg_conn_rate'], b['unique_dsts'], 
+                    b['avg_dur'], b['std_dev_dur']
+                ))
             
             conn.commit()
-            print(f"[+] Computed baselines for {len(baselines)} devices.")
+            print(f"[+] Recomputed flow baselines for {len(baselines)} devices.")
             
         except Exception as e:
             print(f"[-] Baseline Compute Error: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             conn.close()
 

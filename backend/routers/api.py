@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, HTTPException, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from typing import List, Optional
 import psutil
@@ -61,18 +61,20 @@ async def admin_stats_api(username: str = Depends(login_required)):
     }
 
 @router.get("/stats")
-async def api_stats():
+async def api_stats(request: Request):
+    org_id = request.session.get("organization_id")
     # Statistics aggregator - returns dynamic dict based on service
-    return get_stats()
+    return get_stats(organization_id=org_id)
 
 @router.get("/activity", response_model=List[ActivityEntry])
-async def api_activity(severity: Optional[str] = None):
-    rows = fetch_recent_traffic(limit=50, severity=severity)
+async def api_activity(request: Request, severity: Optional[str] = None):
+    org_id = request.session.get("organization_id")
+    rows = fetch_recent_traffic(limit=50, severity=severity, organization_id=org_id)
     return [{
         "time": r["timestamp"], 
         "src_ip": r["source_ip"], 
         "dst_ip": r.get("dst_ip", "-"), 
-        "domain": r["domain"], 
+        "domain": r.get("domain") or "", 
         "protocol": r["protocol"], 
         "size": r.get("packet_size", 0),
         "device": r.get("device_name") or "Unknown",
@@ -102,7 +104,8 @@ async def api_devices(username: str = Depends(login_required)):
             
             devices_map[ip] = {
                 "ip": ip, "mac": mac, "hostname": row.get("device_name") or "Unknown",
-                "traffic": 0.1, "is_online": True, "last_seen": row.get("timestamp"),
+                "traffic": 0.1, "is_online": True, 
+                "last_seen": row["timestamp"],
                 "type": row.get("device_type") or "Unknown",
                 "os": row.get("os_family") or "Unknown",
                 "brand": row.get("brand") or "Unknown",

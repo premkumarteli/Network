@@ -1,62 +1,86 @@
-from .rule_engine import RuleEngine
-from .anomaly_engine import AnomalyEngine
+from .flow_analyzer import flow_analyzer
+from .dns_analyzer import dns_analyzer
+from .baseline_engine import baseline_engine
+from .ml_engine import ml_engine
 from .vpn_detector import VPNDetector
-from services.ml.ml_engine import ml_engine
+import logging
+
+logger = logging.getLogger("netvisor.detection.risk")
 
 class RiskEngine:
     def __init__(self):
-        self.rule_engine = RuleEngine()
-        self.anomaly_engine = AnomalyEngine()
         self.vpn_detector = VPNDetector()
 
-    def calculate_device_risk(self, domain, src_ip, dst_ip, port, rcode=0, baseline=None):
+    def evaluate_flow(self, flow, baseline=None) -> dict:
         """
-        Aggregates all findings into a single risk report.
-        Formula: risk = (anomaly_score * 0.5 + vpn_score * 0.3 + rule_score * 0.2)
-        Wait, I'll stick to the one in the plan or a simplified aggregate.
+        Phase 2: Final risk assessment based on the hybrid formula.
+        final_risk = (flow * 0.25) + (dns * 0.20) + (baseline * 0.20) + (ml * 0.25) + (vpn * 0.10)
         """
-        # 1. Rule Engine (Lexical)
-        rule_score, entropy = self.rule_engine.analyze(domain)
+        # 1. Component Scores
+        flow_score = flow_analyzer.analyze(flow)
         
-        # 2. Anomaly Engine (Behavioral)
-        anomaly_score = self.anomaly_engine.analyze_behavior(src_ip, domain, rcode, baseline)
+        dns_score = 0.0
+        # If it's a DNS flow or we have domain data
+        if hasattr(flow, 'domain') and flow.domain:
+            dns_score = dns_analyzer.analyze(flow.domain)
+        elif flow.dst_port == 53:
+            dns_score = 0.3 # generic flag for DNS traffic if no domain captured
+            
+        # Baseline analysis (assuming connection rate / unique destinations provided in 'flow' object for context)
+        # In a real impl, these are pulled from a windowing service
+        conn_rate = getattr(flow, 'conn_rate', 0)
+        unique_dst = getattr(flow, 'unique_dst', 0)
+        base_score = baseline_engine.analyze(flow.src_ip, conn_rate, unique_dst, flow.duration, baseline)
         
-        # 3. VPN Detector
-        vpn_score, vpn_reason = self.vpn_detector.analyze_vpn(src_ip, dst_ip, port)
+        # ML Inference
+        # Features: [packet_count, byte_count, duration, avg_packet_size, src_port, dst_port]
+        features = [flow.packet_count, flow.byte_count, flow.duration, flow.average_packet_size, flow.src_port, flow.dst_port]
+        ml_score = ml_engine.predict(features)
         
-        # 4. ML Engine
-        ml_prob = ml_engine.predict_risk(domain)
-        ml_score = 10 if ml_prob > 0.8 else (5 if ml_prob > 0.5 else 0)
-
-        # FINAL AGGREGATION
-        # We cap sub-scores or weight them
-        # Total score 0-100
-        total_score = (
-            (anomaly_score * 4) + # max ~40
-            (vpn_score * 2) +     # max ~40
-            (rule_score * 3) +    # max ~21
-            (ml_score * 2)        # max ~20
+        # VPN Detection
+        vpn_score, _ = self.vpn_detector.analyze_vpn(flow.src_ip, flow.dst_ip, flow.dst_port)
+        vpn_score /= 40.0 # Normalize existing vpn_detector score (max ~40)
+        
+        # 2. Weighted Formula
+        final_risk = (
+            (flow_score * 0.25) +
+            (dns_score * 0.20) +
+            (base_score * 0.20) +
+            (ml_score * 0.25) +
+            (vpn_score * 0.10)
         )
         
-        total_score = min(100, total_score)
+        # Normalize to 0-100
+        final_score = min(100, int(final_risk * 100))
         
-        reasons = []
-        if rule_score > 4: reasons.append("Suspicious Domain Structure (Lexical)")
-        if anomaly_score > 4: reasons.append("Anomalous Query Rate/Pattern")
-        if vpn_score > 0: reasons.append(vpn_reason or "VPN Tunneling pattern")
-        if ml_score > 5: reasons.append("ML Classifier: Malicious Domain")
-        
+        # Severity Assignment
         severity = "LOW"
-        if total_score > 70: severity = "HIGH"
-        elif total_score > 30: severity = "MEDIUM"
+        if final_score >= 80: severity = "CRITICAL"
+        elif final_score >= 60: severity = "HIGH"
+        elif final_score >= 30: severity = "MEDIUM"
+        
+        breakdown = {
+            "flow_score": round(flow_score, 2),
+            "dns_score": round(dns_score, 2),
+            "baseline_score": round(base_score, 2),
+            "ml_score": round(ml_score, 2),
+            "vpn_score": round(vpn_score, 2)
+        }
         
         return {
-            "score": total_score,
+            "score": final_score,
             "severity": severity,
-            "reasons": reasons,
-            "entropy": entropy,
-            "ml_prob": ml_prob
+            "breakdown": breakdown,
+            "reasons": self._generate_reasons(breakdown, severity)
         }
 
-# Singleton
+    def _generate_reasons(self, breakdown, severity):
+        reasons = []
+        if breakdown["flow_score"] > 0.5: reasons.append("Anomalous port/connection pattern")
+        if breakdown["dns_score"] > 0.5: reasons.append("Suspicious DNS/DGA activity")
+        if breakdown["ml_score"] > 0.7: reasons.append("ML Anomaly Detected")
+        if breakdown["vpn_score"] > 0.5: reasons.append("VPN Tunneling signature")
+        if breakdown["baseline_score"] > 0.5: reasons.append("Behavioral deviation from baseline")
+        return reasons
+
 risk_engine = RiskEngine()

@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, List
 
+
 class PacketLog(BaseModel):
     time: str
     src_ip: str
@@ -21,27 +22,64 @@ class PacketLog(BaseModel):
     mac_address: Optional[str] = "-"
     identity_confidence: Optional[str] = "low"
 
+
+class FlowLog(BaseModel):
+    """
+    Flow-level summary object produced by agents.
+    No risk or detection fields here; purely features.
+    """
+    src_ip: str
+    dst_ip: str
+    src_port: int
+    dst_port: int
+    protocol: str
+    start_time: str
+    last_seen: str
+    packet_count: int
+    byte_count: int
+    duration: float
+    average_packet_size: float
+    agent_id: str
+    organization_id: str
+
 class DeviceRisk(BaseModel):
     device_id: str
     ip_address: str
     current_score: float
-    risk_level: str # LOW, MEDIUM, HIGH
+    risk_level: str # LOW, MEDIUM, HIGH, CRITICAL
     reasons: List[str]
     last_updated: str
     organization_id: str
 
+class RiskHistory(BaseModel):
+    device_ip: str
+    risk_score: float
+    severity: str
+    timestamp: str
+    organization_id: str
+
 class DeviceBaseline(BaseModel):
     device_id: str
-    avg_packet_rate: float
-    avg_dns_per_hour: float
-    avg_ports_used: int
-    active_hours_pattern: str # JSON-encoded or simple string description
+    ip_address: str
+    avg_connections_per_min: float
+    avg_unique_destinations: float
+    avg_flow_duration: float
+    std_dev_connections: float
     last_computed: str
+    organization_id: str
+
+class Alert(BaseModel):
+    device_ip: str
+    severity: str
+    risk_score: float
+    breakdown_json: str # Store as JSON string for flexibility
+    timestamp: str
+    resolved: bool = False
     organization_id: str
 
 # --- API REQUEST SCHEMAS ---
 
-class UserLogin(BaseModel):
+class UserLogin(BaseModel) :
     username: str
     password: str
 

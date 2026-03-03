@@ -24,13 +24,14 @@ const DeviceTable = ({ devices }) => {
               <tr key={index} className="fade-in">
                 <td className="mono primary">{device.ip}</td>
                 <td>{device.hostname || "Unknown"}</td>
-                <td className="mono muted">{device.mac || "-"}</td>
+                <td className="mono muted">{device.mac_address || "-"}</td>
                 <td>
                     <span className={`badge ${device.risk_level === 'HIGH' ? 'danger' : (device.risk_level === 'MEDIUM' ? 'warning' : 'success')}`}>
-                        <i className={`ri-${device.risk_level === 'HIGH' ? 'error-warning' : (device.risk_level === 'MEDIUM' ? 'alert' : 'checkbox-circle')}-line`}></i> {device.risk_score}% {device.risk_level}
+                        <i className={`ri-${device.risk_level === 'HIGH' ? 'error-warning' : (device.risk_level === 'MEDIUM' ? 'alert' : 'checkbox-circle')}-line`}></i> {device.risk_score || 0}% {device.risk_level || 'LOW'}
                     </span>
                 </td>
-                <td className="mono">{new Date(device.last_seen * 1000).toLocaleString()}</td>
+                {/* last_seen is already formatted as a string by the backend in our new changes */}
+                <td className="mono">{device.last_seen || "Unknown"}</td>
                 <td>
                     <span className={`badge ${device.is_online ? 'success' : 'neutral'}`}>
                         {device.is_online ? 'Online' : 'Offline'}

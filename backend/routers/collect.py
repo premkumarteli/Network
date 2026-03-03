@@ -1,10 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request, Depends, status
 from typing import List
 import asyncio
-import datetime
 import logging
-from core.models import PacketLog, AgentRegistration, AgentHeartbeat, GenericResponse
-from core.database import packet_queue
+from core.models import PacketLog, FlowLog, AgentRegistration, AgentHeartbeat, GenericResponse
+from core.database import packet_queue, flow_queue
 from ..config import AGENT_API_KEY
 from ..dependencies import rate_limit
 
@@ -44,8 +43,50 @@ async def receive_batch_logs(logs: List[PacketLog], authorized: bool = Depends(v
     
     if count == 0 and len(logs) > 0:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Buffer full")
-        
+    
+    print(f"[*] Received batch of {count} logs from agent")
     return {"status": "success", "message": f"Buffered {count} logs"}
+
+
+@router.post("/flow", response_model=GenericResponse)
+async def receive_flow_log(
+    log: FlowLog,
+    authorized: bool = Depends(validate_agent_key),
+):
+    """
+    Single flow summary ingestion endpoint.
+    No detection logic here; flows are simply queued for async DB persistence.
+    """
+    try:
+        flow_queue.put_nowait(log)
+        return {"status": "success", "message": "Flow buffered"}
+    except asyncio.QueueFull:
+        logger.error("Flow queue full - dropping flow")
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Buffer full - dropping flow")
+
+
+@router.post("/flow/batch", response_model=GenericResponse)
+async def receive_batch_flows(
+    logs: List[FlowLog],
+    authorized: bool = Depends(validate_agent_key),
+):
+    """
+    Batch flow ingestion endpoint for gateway and endpoint agents.
+    """
+    count = 0
+    for log in logs:
+        try:
+            flow_queue.put_nowait(log)
+            count += 1
+        except asyncio.QueueFull:
+            logger.error(f"Flow queue full during batch - buffered {count}/{len(logs)}")
+            break
+
+    if count == 0 and len(logs) > 0:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Buffer full")
+
+    logger.info(f"[*] Received batch of {count} flows from agent")
+    return {"status": "success", "message": f"Buffered {count} flows"}
 
 @router.post("/register")
 async def register_agent(reg: AgentRegistration, authorized: bool = Depends(validate_agent_key)):

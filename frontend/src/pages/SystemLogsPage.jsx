@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { systemService } from '../services/api';
 
 const SystemLogsPage = () => {
     const [logs, setLogs] = useState({ admin: [], vpn: [] });
@@ -11,8 +11,14 @@ const SystemLogsPage = () => {
 
     const fetchLogs = async () => {
         try {
-            const res = await axios.get('/api/logs');
-            setLogs(res.data);
+            // Using getAlerts for VPN alerts and leaving admin blank for now
+            const res = await systemService.getAlerts();
+            const vpnAlerts = res.data.filter(a => a.breakdown && a.breakdown.vpn_score > 0);
+            
+            setLogs({
+                admin: [], // Placeholder for future admin events
+                vpn: vpnAlerts
+            });
             setLoading(false);
         } catch (err) {
             console.error("Failed to fetch system logs", err);
@@ -67,14 +73,14 @@ const SystemLogsPage = () => {
                                 <tr><td colSpan="4" className="empty-state">No VPN alerts.</td></tr>
                             ) : logs.vpn.map((l, i) => (
                                 <tr key={i} style={{ borderLeft: '2px solid var(--danger)', background: 'rgba(239, 68, 68, 0.05)' }}>
-                                    <td className="mono muted">{new Date(l.time).toLocaleString()}</td>
-                                    <td className="mono primary">{l.src_ip}</td>
+                                    <td className="mono muted">{l.timestamp}</td>
+                                    <td className="mono primary">{l.device_ip}</td>
                                     <td>
                                         <div className="progress-bar">
-                                            <div className="fill danger" style={{ width: `${l.score * 100}%` }}></div>
+                                            <div className="fill danger" style={{ width: `${l.risk_score}%` }}></div>
                                         </div>
                                     </td>
-                                    <td className="small danger">{l.reason}</td>
+                                    <td className="small danger">{l.severity}</td>
                                 </tr>
                             ))}
                         </tbody>

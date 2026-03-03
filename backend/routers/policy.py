@@ -1,7 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends
-from core.models import PolicyUpdate, GenericResponse
+from fastapi import APIRouter, HTTPException
+from core.models import PolicyUpdate
 from core.database import get_db_connection
-import json
 
 router = APIRouter(prefix="/api/v1/policy", tags=["Policy Management"])
 

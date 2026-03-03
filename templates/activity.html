@@ -1,0 +1,42 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="bento-grid animate-enter">
+  <div class="bento-card span-4">
+    <div class="card-header">
+      <span class="card-title">Live Network Activity</span>
+      <div style="display: flex; gap: 1rem;">
+        <button class="action-btn" onclick="refreshActivity()">
+          <i class="ri-refresh-line"></i> Refresh
+        </button>
+      </div>
+    </div>
+
+    <div style="overflow-x: auto;">
+      <table class="modern-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Source IP</th>
+            <th>Destination IP</th>
+            <th>Domain / Host</th>
+            <th>Protocol</th>
+            <th>Size</th>
+          </tr>
+        </thead>
+        <tbody id="activity-table-body">
+          <tr>
+            <td colspan="6" style="text-align:center; padding: 2rem; color: var(--text-muted);">
+              <i class="ri-loader-4-line ri-spin" style="font-size: 2rem;"></i><br>Loading activity...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/Activity.js') }}?v=2"></script>
+{% endblock %}

@@ -21,16 +21,16 @@ const ThreatTable = ({ threats }) => {
           ) : (
             threats.map((t, index) => (
               <tr key={index} className="fade-in">
-                <td className="mono muted">{t.time.split(" ")[1]}</td>
-                <td className="mono primary">{t.domain !== "-" ? t.domain : t.dst_ip}</td>
-                <td className="mono">{t.ip} ({t.device})</td>
+                <td className="mono muted">{t.timestamp || "N/A"}</td>
+                <td className="mono primary">{t.device_ip || t.src_ip}</td>
+                <td className="mono">{t.flow_id ? `Flow: ${t.flow_id.substring(0,8)}` : "-"}</td>
                 <td>
                     <span className="text-warning small italic">
-                        <i className="ri-information-line"></i> AI Detection: Suspicious Activity
+                        <i className="ri-information-line"></i> {t.message || "AI Detection: Suspicious Activity"}
                     </span>
                 </td>
                 <td>
-                    <span className="badge danger">CRITICAL</span>
+                    <span className={`badge ${t.severity === 'CRITICAL' ? 'danger' : 'warning'}`}>{t.severity}</span>
                 </td>
               </tr>
             ))

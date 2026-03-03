@@ -5,20 +5,20 @@ const StatsPanel = ({ stats }) => {
     <div className="stats-grid">
       <div className="stat-card">
         <h3>Active Devices</h3>
-        <div className="stat-value">{stats.devices || 0}</div>
+        <div className="stat-value">{stats.active_devices || 0}</div>
       </div>
-      <div className={`stat-card ${stats.vpn_alerts > 0 ? 'danger-pulse' : ''}`}>
-        <h3>VPN Alerts</h3>
-        <div className="stat-value warning">{stats.vpn_alerts || 0}</div>
-      </div>
-      <div className="stat-card">
-        <h3>Total Traffic</h3>
-        <div className="stat-value">{stats.bandwidth || "0 MB"}</div>
+      <div className={`stat-card ${stats.high_risk > 0 ? 'danger-pulse' : ''}`}>
+        <h3>High Risk Alerts</h3>
+        <div className="stat-value warning">{stats.high_risk || 0}</div>
       </div>
       <div className="stat-card">
-        <h3>Upload / Download</h3>
+        <h3>Total Flows (24h)</h3>
+        <div className="stat-value">{stats.flows_24h || 0}</div>
+      </div>
+      <div className="stat-card">
+        <h3>Bandwidth</h3>
         <div className="stat-value small">
-          {stats.upload_speed || 0} / {stats.download_speed || 0}
+          {stats.bandwidth || "0 MB"}
         </div>
       </div>
     </div>

@@ -1,14 +1,8 @@
-from fastapi import APIRouter, Request, Form, Depends, HTTPException
+from fastapi import APIRouter, Request, HTTPException
 import time
-from fastapi.responses import JSONResponse
 from core.database import get_db_connection
 from core.security import verify_password, hash_password
 
-from fastapi import APIRouter, Request, Depends, HTTPException, status
-import time
-from fastapi.responses import JSONResponse
-from core.database import get_db_connection
-from core.security import verify_password, hash_password
 from core.models import UserLogin, UserRegister, GenericResponse
 import uuid
 

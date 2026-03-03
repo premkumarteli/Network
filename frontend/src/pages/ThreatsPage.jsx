@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { systemService } from '../services/api';
 import ThreatTable from '../components/Threats/ThreatTable';
 
 const ThreatsPage = () => {
@@ -15,9 +15,11 @@ const ThreatsPage = () => {
 
     const fetchThreats = async () => {
         try {
-            // Fetch only High Severity traffic
-            const res = await axios.get('/api/activity?severity=HIGH');
-            setThreats(res.data);
+            // Fetch alerts from the new backend
+            const res = await systemService.getAlerts();
+            // Filter high/critical severity on client for now if backend doesn't filter
+            const highRisk = res.data.filter(a => ['HIGH', 'CRITICAL'].includes(a.severity));
+            setThreats(highRisk);
             setLoading(false);
         } catch (err) {
             console.error("Failed to fetch threats", err);

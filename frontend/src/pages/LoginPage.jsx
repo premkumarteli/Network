@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { authService } from '../services/api';
 
 const LoginPage = () => {
     const [username, setUsername] = useState('');
@@ -11,14 +11,15 @@ const LoginPage = () => {
     const handleLogin = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('/login', { username, password });
-            if (res.data.status === 'success') {
+            const res = await authService.login({ username, password });
+            if (res.data.access_token) {
+                localStorage.setItem('access_token', res.data.access_token);
                 navigate('/');
             } else {
-                setError(res.data.message || 'Login failed');
+                setError('Login failed: No access token received');
             }
         } catch (err) {
-            setError(err.response?.data?.message || 'Connection error');
+            setError(err.response?.data?.detail || 'Connection error');
         }
     };
 
