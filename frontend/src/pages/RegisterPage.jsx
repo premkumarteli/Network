@@ -1,7 +1,6 @@
-import React, { useState } from "react";
-import axios from "axios";
+import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
-
+import { authService } from "../services/api";
 const RegisterPage = () => {
   const [formData, setFormData] = useState({
     username: "",
@@ -26,14 +25,10 @@ const RegisterPage = () => {
     }
 
     try {
-      const res = await axios.post("/register", formData);
-      if (res.data.status === "success") {
-        navigate("/login");
-      } else {
-        setError(res.data.message || "Registration failed");
-      }
+      await authService.register(formData);
+      navigate("/login");
     } catch (err) {
-      setError(err.response?.data?.message || "Connection error");
+      setError(err.response?.data?.detail || err.response?.data?.message || err.message || "Registration failed");
     }
   };
 

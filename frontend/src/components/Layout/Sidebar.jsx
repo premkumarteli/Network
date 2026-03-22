@@ -1,9 +1,23 @@
-import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
 
-const Sidebar = () => {
+const Sidebar = ({ isCollapsed, toggleSidebar }) => {
+  const { isAdmin } = useAuth();
+  const links = isAdmin
+    ? [
+        { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
+        { to: '/devices', icon: 'ri-macbook-line', label: 'Devices' },
+        { to: '/apps', icon: 'ri-apps-2-line', label: 'Applications' },
+        { to: '/threats', icon: 'ri-shield-flash-line', label: 'Threats' },
+        { to: '/logs', icon: 'ri-radar-line', label: 'Agent Monitoring' },
+        { to: '/vpn', icon: 'ri-shield-keyhole-line', label: 'VPN' },
+      ]
+    : [
+        { to: '/user', icon: 'ri-shield-user-line', label: 'My Security' },
+      ];
+
   return (
-    <nav className="sidebar" id="sidebar">
+    <nav className={`sidebar ${isCollapsed ? 'collapsed' : ''}`} id="sidebar">
       <div className="sidebar-header">
         <div className="logo" style={{ color: 'var(--primary)' }}>
           <i className="ri-radar-line flicker-slow"></i>
@@ -12,56 +26,36 @@ const Sidebar = () => {
       </div>
 
       <div className="nav-links">
-        <NavLink 
-          to="/" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-          end
-        >
-          <i className="ri-dashboard-3-line"></i> <span>Dashboard</span>
-        </NavLink>
-        <NavLink 
-          to="/devices" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-macbook-line"></i> <span>Devices</span>
-        </NavLink>
-        <NavLink 
-          to="/activity" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-pulse-line"></i> <span>Live Traffic</span>
-        </NavLink>
-        <NavLink 
-          to="/threats" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-shield-flash-line"></i> <span>Threats</span>
-        </NavLink>
-        <NavLink 
-          to="/logs" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-history-line"></i> <span>System Logs</span>
-        </NavLink>
-        <NavLink 
-          to="/vpn" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-shield-keyhole-line"></i> <span>VPN</span>
-        </NavLink>
-        <NavLink 
-          to="/settings" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-settings-4-line"></i> <span>Settings</span>
-        </NavLink>
-        <NavLink 
-          to="/user" 
-          className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}
-        >
-          <i className="ri-user-settings-line"></i> <span>User Profile</span>
-        </NavLink>
+        {links.map((link) => (
+          <NavLink
+            key={link.to}
+            to={link.to}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            <i className={link.icon}></i> <span>{link.label}</span>
+          </NavLink>
+        ))}
       </div>
+
+      <button 
+        className="sidebar-toggle-btn" 
+        onClick={toggleSidebar}
+        style={{
+          marginTop: 'auto',
+          background: 'transparent',
+          border: '1px solid var(--glass-border)',
+          color: 'var(--text-muted)',
+          padding: '1rem',
+          cursor: 'pointer',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          transition: 'all 0.3s ease'
+        }}
+      >
+        <i className={isCollapsed ? "ri-arrow-right-s-line" : "ri-arrow-left-s-line"}></i>
+        {!isCollapsed && <span style={{ marginLeft: '0.5rem' }}>Collapse</span>}
+      </button>
     </nav>
   );
 };

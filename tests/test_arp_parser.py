@@ -1,12 +1,14 @@
 import sys
 import os
+import socket
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 # Add the project root to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.device_detector import DeviceDetector
+from agent.device_detector import DeviceDetector
 
 class TestARPParser(unittest.TestCase):
     def setUp(self):
@@ -56,5 +58,42 @@ Interface: 172.26.162.96 --- 0x10
         print("\n[SUCCESS] ARP Parsing and Filtering Logic Verified.")
         print(f"Discovered {len(arp_map)} valid unicast devices.")
 
+    @patch("psutil.net_if_addrs")
+    def test_infer_local_network_uses_interface_netmask(self, mock_net_if_addrs):
+        mock_net_if_addrs.return_value = {
+            "Ethernet": [
+                SimpleNamespace(
+                    family=socket.AF_INET,
+                    address="10.128.88.96",
+                    netmask="255.255.255.0",
+                )
+            ]
+        }
+
+        detector = DeviceDetector(local_ip="10.128.88.96")
+        self.assertEqual(detector.infer_local_network(), "10.128.88.0/24")
+
+    def test_collect_arp_candidates_merges_active_and_passive_sources(self):
+        detector = DeviceDetector(local_ip="10.128.88.96")
+        detector.parse_arp_table = lambda: {
+            "10.128.88.131": "aa:bb:cc:dd:ee:01",
+            "10.128.88.96": "aa:bb:cc:dd:ee:ff",
+        }
+        detector.arp_scan = lambda network=None: [
+            {"ip": "10.128.88.172", "mac": "aa:bb:cc:dd:ee:02"},
+            {"ip": "224.0.0.22", "mac": "01:00:5e:00:00:16"},
+        ]
+
+        candidates = detector.collect_arp_candidates("10.128.88.0/24")
+
+        self.assertEqual(
+            candidates,
+            {
+                "10.128.88.131": "aa:bb:cc:dd:ee:01",
+                "10.128.88.172": "aa:bb:cc:dd:ee:02",
+            },
+        )
+
 if __name__ == '__main__':
     unittest.main()
+

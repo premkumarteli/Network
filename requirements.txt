@@ -15,5 +15,14 @@ uvicorn
 psutil
 PyJWT
 pydantic
+pydantic-settings
 python-multipart
 cryptography
+python-jose[cryptography]
+passlib[bcrypt]
+email-validator
+mac-vendor-lookup
+httpx
+tldextract
+geoip2
+mitmproxy

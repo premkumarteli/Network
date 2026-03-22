@@ -1,26 +1,36 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useCallback, useEffect, useState } from 'react';
+import { systemService } from '../services/api';
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 
 const VPNPage = () => {
     const [alerts, setAlerts] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchAlerts();
-        const interval = setInterval(fetchAlerts, 5000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const fetchAlerts = async () => {
+    const fetchAlerts = useCallback(async ({ background = false } = {}) => {
+        if (!background) {
+            setLoading(true);
+        }
         try {
-            const res = await axios.get('/api/logs'); // Reusing logs endpoint which returns vpn alerts
-            setAlerts(res.data.vpn || []);
-            setLoading(false);
+            const res = await systemService.getVPNAlerts({
+                resolved: false,
+                hours: 24,
+                limit: 100,
+            });
+            setAlerts(res.data || []);
         } catch (err) {
             console.error("Failed to fetch VPN alerts", err);
-            setLoading(false);
+        } finally {
+            if (!background) {
+                setLoading(false);
+            }
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        fetchAlerts();
+    }, [fetchAlerts]);
+
+    useVisibilityPolling(() => fetchAlerts({ background: true }), 15000);
 
     return (
         <div className="animate-fade">
@@ -56,16 +66,16 @@ const VPNPage = () => {
                         <tbody>
                         {alerts.map((a, index) => (
                             <tr key={index} className="fade-in" style={{ borderLeft: '2px solid var(--danger)', background: 'rgba(239, 68, 68, 0.05)' }}>
-                                <td className="mono muted">{new Date(a.time).toLocaleString()}</td>
-                                <td className="mono primary">{a.src_ip}</td>
+                                <td className="mono muted">{new Date(a.timestamp).toLocaleString()}</td>
+                                <td className="mono primary">{a.device_ip}</td>
                                 <td>
                                     <div className="progress-bar">
-                                        <div className="fill danger" style={{ width: `${a.score * 100}%` }}></div>
+                                        <div className="fill danger" style={{ width: `${Math.min(Number(a.risk_score) || 0, 100)}%` }}></div>
                                     </div>
                                 </td>
-                                <td className="danger">{a.reason}</td>
+                                <td className="danger">{a.message || a.breakdown?.primary_detection || a.severity}</td>
                                 <td>
-                                    <button className="action-btn" onClick={() => alert(`Details: ${a.reason}`)}>
+                                    <button className="action-btn" onClick={() => window.alert(`Details: ${a.message || a.severity}`)}>
                                         <i className="ri-eye-line"></i>
                                     </button>
                                 </td>

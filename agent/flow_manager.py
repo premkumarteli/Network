@@ -4,9 +4,9 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Tuple, Optional
 
-from scapy.all import IP, TCP, UDP  # type: ignore
+from scapy.all import Ether, IP, TCP, UDP  # type: ignore
 
 
 FlowKey = Tuple[str, str, int, int, str]  # (src_ip, dst_ip, src_port, dst_port, protocol)
@@ -16,9 +16,13 @@ FlowKey = Tuple[str, str, int, int, str]  # (src_ip, dst_ip, src_port, dst_port,
 class FlowState:
     start_time: float
     last_seen: float
+    last_flushed: float
     packet_count: int
     byte_count: int
     domain: Optional[str] = None
+    sni: Optional[str] = None
+    src_mac: Optional[str] = None
+    dst_mac: Optional[str] = None
 
     @property
     def duration(self) -> float:
@@ -49,6 +53,9 @@ class FlowSummary:
     agent_id: str
     organization_id: str
     domain: Optional[str] = None
+    sni: Optional[str] = None
+    src_mac: Optional[str] = None
+    dst_mac: Optional[str] = None
 
 
 class FlowManager:
@@ -72,6 +79,7 @@ class FlowManager:
         on_flow_expired: Callable[[FlowSummary], None],
         tcp_timeout: int = 60,
         udp_timeout: int = 30,
+        flush_interval: float = 5.0,
         max_flows: int = 50_000,
         cleanup_interval: float = 5.0,
     ) -> None:
@@ -80,6 +88,7 @@ class FlowManager:
         self.on_flow_expired = on_flow_expired
         self.tcp_timeout = tcp_timeout
         self.udp_timeout = udp_timeout
+        self.flush_interval = flush_interval
         self.max_flows = max_flows
         self.cleanup_interval = cleanup_interval
 
@@ -123,6 +132,8 @@ class FlowManager:
         key: FlowKey = (ip.src, ip.dst, sport, dport, proto)
         now = time.time()
         size = len(packet)
+        src_mac = packet[Ether].src if packet.haslayer(Ether) else None
+        dst_mac = packet[Ether].dst if packet.haslayer(Ether) else None
 
         with self._lock:
             state = self._flows.get(key)
@@ -134,8 +145,13 @@ class FlowManager:
                 self._flows[key] = FlowState(
                     start_time=now,
                     last_seen=now,
+                    last_flushed=now,
                     packet_count=1,
                     byte_count=size,
+                    domain=getattr(packet, "captured_domain", None),
+                    sni=getattr(packet, "captured_sni", None),
+                    src_mac=src_mac,
+                    dst_mac=dst_mac,
                 )
             else:
                 state.last_seen = now
@@ -144,6 +160,12 @@ class FlowManager:
                 # Capture domain if present (e.g. from DNS layer added by main agent)
                 if hasattr(packet, 'captured_domain'):
                     state.domain = packet.captured_domain
+                if hasattr(packet, 'captured_sni'):
+                    state.sni = packet.captured_sni
+                if src_mac:
+                    state.src_mac = src_mac
+                if dst_mac:
+                    state.dst_mac = dst_mac
 
     # -------- internal workers --------
 
@@ -162,23 +184,43 @@ class FlowManager:
     def _expire_flows(self) -> None:
         now = time.time()
         expired: Dict[FlowKey, FlowState] = {}
+        flushed: Dict[FlowKey, FlowState] = {}
+        # print(f"DEBUG: _expire_flows checking {len(self._flows)} flows")
 
         with self._lock:
             for key, state in list(self._flows.items()):
                 _, _, _, _, proto = key
                 timeout = self.tcp_timeout if proto == "TCP" else self.udp_timeout
                 if now - state.last_seen >= timeout:
-                    expired[key] = state
+                    if state.packet_count > 0:
+                        expired[key] = state
                     del self._flows[key]
+                elif state.packet_count > 0 and now - state.last_flushed >= self.flush_interval:
+                    flushed[key] = FlowState(
+                        start_time=state.start_time,
+                        last_seen=state.last_seen,
+                        last_flushed=state.last_flushed,
+                        packet_count=state.packet_count,
+                        byte_count=state.byte_count,
+                        domain=state.domain,
+                        sni=state.sni,
+                        src_mac=state.src_mac,
+                        dst_mac=state.dst_mac,
+                    )
+                    state.start_time = state.last_seen
+                    state.last_seen = state.last_seen
+                    state.last_flushed = now
+                    state.packet_count = 0
+                    state.byte_count = 0
 
         # Emit summaries outside the lock
-        for key, state in expired.items():
-            summary = self._build_summary(key, state)
-            try:
-                self.on_flow_expired(summary)
-            except Exception:
-                # Downstream failures must not impact flow table maintenance.
-                continue
+        for collection in (flushed, expired):
+            for key, state in collection.items():
+                summary = self._build_summary(key, state)
+                try:
+                    self.on_flow_expired(summary)
+                except Exception:
+                    continue
 
     def _build_summary(self, key: FlowKey, state: FlowState) -> FlowSummary:
         src_ip, dst_ip, sport, dport, proto = key
@@ -198,6 +240,9 @@ class FlowManager:
             duration=state.duration,
             average_packet_size=state.average_packet_size,
             domain=state.domain,
+            sni=state.sni,
+            src_mac=state.src_mac,
+            dst_mac=state.dst_mac,
             agent_id=self.agent_id,
             organization_id=self.organization_id,
         )

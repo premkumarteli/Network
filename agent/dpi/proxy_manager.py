@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+import json
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import threading
+from pathlib import Path
+from typing import Callable, Optional
+
+from .mitm_addon import EVENT_PREFIX
+
+logger = logging.getLogger(__name__)
+
+
+class ProxyManager:
+    def __init__(
+        self,
+        *,
+        runtime_dir: Path,
+        addon_path: Path,
+        port: int,
+        on_event: Callable[[dict], None],
+    ) -> None:
+        self.runtime_dir = Path(runtime_dir)
+        self.runtime_dir.mkdir(parents=True, exist_ok=True)
+        self.addon_path = Path(addon_path)
+        self.port = int(port)
+        self.on_event = on_event
+        self.process: Optional[subprocess.Popen] = None
+        self.last_error: Optional[str] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._stdout_thread: Optional[threading.Thread] = None
+
+    def _mitmdump_path(self) -> Optional[str]:
+        discovered = shutil.which("mitmdump")
+        if discovered:
+            return discovered
+
+        candidate_dirs = [
+            Path(sys.executable).resolve().parent / "Scripts",
+            Path.home() / "AppData/Roaming/Python/Python313/Scripts",
+            Path.home() / "AppData/Roaming/Python/Python312/Scripts",
+            Path.home() / "AppData/Roaming/Python/Python311/Scripts",
+        ]
+        for directory in candidate_dirs:
+            candidate = directory / "mitmdump.exe"
+            if candidate.exists():
+                return str(candidate)
+        return None
+
+    def _build_env(self, *, allowed_domains: list[str], snippet_max_bytes: int) -> dict:
+        env = os.environ.copy()
+        env["NETVISOR_ALLOWED_DOMAINS_JSON"] = json.dumps(allowed_domains)
+        env["NETVISOR_SNIPPET_MAX_BYTES"] = str(snippet_max_bytes)
+        return env
+
+    def is_running(self) -> bool:
+        return self.process is not None and self.process.poll() is None
+
+    def start(self, *, allowed_domains: list[str], snippet_max_bytes: int) -> tuple[bool, Optional[str]]:
+        if self.is_running():
+            return True, None
+
+        mitmdump = self._mitmdump_path()
+        if not mitmdump:
+            self.last_error = "mitmdump not found on PATH"
+            return False, self.last_error
+
+        cmd = [
+            mitmdump,
+            "--listen-host",
+            "127.0.0.1",
+            "--listen-port",
+            str(self.port),
+            "--ssl-insecure",
+            "-q",
+            "-s",
+            str(self.addon_path),
+        ]
+        try:
+            self.process = subprocess.Popen(
+                cmd,
+                cwd=str(self.runtime_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=self._build_env(
+                    allowed_domains=allowed_domains,
+                    snippet_max_bytes=snippet_max_bytes,
+                ),
+            )
+        except OSError as exc:
+            self.last_error = str(exc)
+            self.process = None
+            return False, self.last_error
+
+        self.last_error = None
+        self._stdout_thread = threading.Thread(target=self._stdout_worker, daemon=True)
+        self._stdout_thread.start()
+        self._stderr_thread = threading.Thread(target=self._stderr_worker, daemon=True)
+        self._stderr_thread.start()
+        return True, None
+
+    def stop(self) -> None:
+        if not self.process:
+            return
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+        self.process = None
+
+    def _stdout_worker(self) -> None:
+        if not self.process or not self.process.stdout:
+            return
+        for line in self.process.stdout:
+            if not line:
+                continue
+            if not line.startswith(EVENT_PREFIX):
+                continue
+            payload = line[len(EVENT_PREFIX) :].strip()
+            try:
+                self.on_event(json.loads(payload))
+            except (TypeError, ValueError):
+                logger.debug("Discarded invalid mitmproxy event payload")
+
+    def _stderr_worker(self) -> None:
+        if not self.process or not self.process.stderr:
+            return
+        for line in self.process.stderr:
+            message = (line or "").strip()
+            if not message:
+                continue
+            self.last_error = message
+            logger.debug("mitmdump: %s", message)
+
+    def status(self) -> dict:
+        return {
+            "proxy_running": self.is_running(),
+            "proxy_port": self.port,
+            "last_error": self.last_error,
+        }

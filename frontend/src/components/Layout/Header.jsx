@@ -1,7 +1,11 @@
-import { authService, systemService } from "../../services/api";
+import { useState, useEffect, useRef } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "../../hooks/useAuth";
+import { useVisibilityPolling } from "../../hooks/useVisibilityPolling";
+import { systemService } from "../../services/api";
 
 const Header = () => {
-  const [user, setUser] = useState({ username: "Guest", role: "Viewer" });
+  const { user, isAdmin, logout } = useAuth();
   const [systemHealth, setSystemHealth] = useState({
     status: "Operational",
     cpu: 0,
@@ -14,35 +18,27 @@ const Header = () => {
   const location = useLocation();
 
   // Mapping routes to titles
-  const getTitle = () => {
-    const path = location.pathname;
-    if (path === "/") return "Dashboard";
-    if (path === "/devices") return "Devices";
-    if (path === "/threats") return "Threats";
-    if (path === "/activity") return "Live Traffic";
-    if (path === "/logs") return "System Logs";
+    const getTitle = () => {
+      const path = location.pathname;
+      if (path === "/") return "Dashboard";
+      if (path === "/devices") return "Devices";
+      if (path === "/apps" || path.startsWith("/apps/")) return "Applications";
+      if (path === "/threats") return "Threats";
+      if (path === "/activity") return "Live Traffic";
+      if (path === "/logs") return "Agent Monitoring";
+      if (path.startsWith("/agents/")) return "Agent Details";
     if (path === "/vpn") return "VPN & Threats";
-    if (path === "/settings") return "Settings";
+      if (path === "/settings") return "Settings";
+    if (path === "/user") return "My Security";
+    if (path.startsWith("/user/")) return "Device Workspace";
     return "NetVisor";
   };
 
   useEffect(() => {
-    // Fetch User Info
-    authService.getCurrentUser().then((res) => {
-      if (res.data.authenticated) {
-        setUser({
-          username: res.data.username || "Admin",
-          role: res.data.role || "Administrator",
-        });
-      }
-    }).catch(() => {
-      setUser({ username: "Guest", role: "Viewer" });
-    });
-
-    // Theme Init
     document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
 
-    // Click setup
+  useEffect(() => {
     const handleClickOutside = (event) => {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setMenuOpen(false);
@@ -50,27 +46,49 @@ const Header = () => {
     };
     document.addEventListener("mousedown", handleClickOutside);
 
-    // System Health Polling
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
     const fetchHealth = async () => {
       try {
         const res = await systemService.getHealth();
         setSystemHealth({
           status: res.data.status === "healthy" ? "Operational" : "Degraded",
-          cpu: 0, // Placeholder
+          cpu: 0,
           session: "Active",
         });
-      } catch (err) {
-        console.error("Health fetch failed", err);
+      } catch {
+        setSystemHealth((prev) => ({
+          ...prev,
+          status: "Degraded",
+        }));
       }
     };
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 5000);
 
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      clearInterval(interval);
-    };
-  }, [theme]);
+    fetchHealth();
+  }, []);
+
+  useVisibilityPolling(
+    async () => {
+      try {
+        const res = await systemService.getHealth();
+        setSystemHealth({
+          status: res.data.status === "healthy" ? "Operational" : "Degraded",
+          cpu: 0,
+          session: "Active",
+        });
+      } catch {
+        setSystemHealth((prev) => ({
+          ...prev,
+          status: "Degraded",
+        }));
+      }
+    },
+    30000
+  );
 
   const toggleTheme = () => {
     const newTheme = theme === "dark" ? "light" : "dark";
@@ -80,7 +98,7 @@ const Header = () => {
   };
 
   const handleLogout = async () => {
-    await authService.logout();
+    await logout();
     navigate("/login");
   };
 
@@ -89,6 +107,8 @@ const Header = () => {
     if (status === "High Load") return "#f59e0b";
     return "var(--danger)";
   };
+
+  const displayUser = user || { username: "Guest", role: "viewer" };
 
   return (
     <div className="header">
@@ -134,10 +154,10 @@ const Header = () => {
 
           <div style={{ textAlign: "right" }}>
             <div style={{ fontWeight: 700, color: "var(--primary)" }}>
-              {user.username}
+              {displayUser.username}
             </div>
             <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              {user.role}
+              {displayUser.role}
             </div>
           </div>
 
@@ -155,7 +175,7 @@ const Header = () => {
               fontWeight: "bold",
             }}
           >
-            {user.username[0].toUpperCase()}
+            {displayUser.username[0].toUpperCase()}
           </div>
 
           <i
@@ -175,14 +195,14 @@ const Header = () => {
                 letterSpacing: "1px",
               }}
             >
-              Admin Info
+              Session Info
             </span>
           </div>
 
           <div className="dropdown-item link" onClick={() => navigate("/user")}>
             <i className="ri-shield-user-line"></i>
             <div>
-              <strong>Role:</strong> {user.role}
+              <strong>Role:</strong> {displayUser.role}
             </div>
           </div>
 
@@ -223,13 +243,15 @@ const Header = () => {
             }}
           ></div>
 
-          <div
-            className="dropdown-item link"
-            onClick={() => navigate("/settings")}
-            style={{ cursor: "pointer" }}
-          >
-            <i className="ri-settings-4-line"></i> Settings
-          </div>
+          {isAdmin ? (
+            <div
+              className="dropdown-item link"
+              onClick={() => navigate("/settings")}
+              style={{ cursor: "pointer" }}
+            >
+              <i className="ri-settings-4-line"></i> Settings
+            </div>
+          ) : null}
 
           <div
             className="dropdown-item link"

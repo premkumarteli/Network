@@ -1,70 +1,94 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { useCallback, useEffect, useState } from 'react';
+import { systemService } from '../services/api';
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 
 const SettingsPage = () => {
     const [stats, setStats] = useState({ cpu_percent: 0, mem_used_mb: 0, mem_total_mb: 1024, maintenance_mode: false });
     const [systemActive, setSystemActive] = useState(false);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        fetchData();
-        const interval = setInterval(fetchData, 2000);
-        return () => clearInterval(interval);
-    }, []);
-
-    const fetchData = async () => {
+    const fetchData = useCallback(async ({ background = false } = {}) => {
+        if (!background) {
+            setLoading(true);
+        }
         try {
             const [statsRes, sysRes] = await Promise.all([
-                axios.get('/api/admin/stats'),
-                axios.get('/api/settings/system/status')
+                systemService.getAdminStats(),
+                systemService.getSystemStatus()
             ]);
-            setStats(statsRes.data);
-            setSystemActive(sysRes.data.active);
-            setLoading(false);
+            setStats(statsRes.data || { cpu_percent: 0, mem_used_mb: 0, mem_total_mb: 1024, maintenance_mode: false });
+            setSystemActive(Boolean(sysRes.data?.active));
         } catch (err) {
             console.error("Failed to fetch settings data", err);
+        } finally {
+            if (!background) {
+                setLoading(false);
+            }
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
+
+    useVisibilityPolling(() => fetchData({ background: true }), 20000);
 
     const toggleMaintenance = async () => {
         try {
-            await axios.post('/api/settings/maintenance', { active: !stats.maintenance_mode });
-            fetchData();
-        } catch (err) {
-            alert("Failed to toggle maintenance mode");
+            await systemService.setMaintenanceMode(!stats.maintenance_mode);
+            await fetchData();
+        } catch {
+            window.alert("Failed to toggle maintenance mode");
         }
     };
 
     const toggleMonitoring = async () => {
         try {
-            await axios.post('/api/settings/system', { active: !systemActive });
-            fetchData();
-        } catch (err) {
-            alert("Failed to toggle monitoring");
+            await systemService.setMonitoring(!systemActive);
+            await fetchData();
+        } catch {
+            window.alert("Failed to toggle monitoring");
         }
     };
 
     const triggerScan = async () => {
-        alert("Scan triggered (Simulation)");
+        try {
+            const res = await systemService.triggerScan();
+            window.alert(res.data.message);
+        } catch {
+            window.alert("Failed to trigger scan");
+        }
     };
 
     const resetDatabase = async () => {
-        if (!confirm("CRITICAL WARNING: This will wipe ALL traffic logs. Are you sure?")) return;
+        if (!window.confirm("CRITICAL WARNING: This will wipe ALL traffic logs. Are you sure?")) return;
         try {
-            const res = await axios.post('/api/admin/reset_db');
-            alert(res.data.message);
+            const res = await systemService.resetDatabase();
+            window.alert(res.data.message);
             window.location.reload();
-        } catch (err) {
-            alert("Failed to reset database");
+        } catch {
+            window.alert("Failed to reset database");
         }
     };
 
     return (
-        <div className="animate-fade">
-            <div className="header">
-                <h2>System Settings</h2>
+        <div className="page-shell animate-fade">
+            <div className="page-hero">
+                <div>
+                    <div className="page-eyebrow">System Control</div>
+                    <h2>System Settings</h2>
+                    <p className="page-subtitle">
+                        Manage server state, maintenance mode, runtime monitoring, and operational data resets.
+                    </p>
+                </div>
+                <button className="action-btn" onClick={() => fetchData()}>
+                    <i className="ri-refresh-line"></i> Refresh
+                </button>
             </div>
             
+            {loading ? (
+                <div className="loading-state">Loading system settings...</div>
+            ) : (
             <div className="stats-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
                 
                 {/* Server Status */}
@@ -84,7 +108,7 @@ const SettingsPage = () => {
                             <span>{(stats.mem_used_mb / 1024).toFixed(1)} / {(stats.mem_total_mb / 1024).toFixed(1)} GB</span>
                         </div>
                         <div className="progress-bar">
-                            <div className="fill primary" style={{ width: `${(stats.mem_used_mb / stats.mem_total_mb) * 100}%` }}></div>
+                            <div className="fill primary" style={{ width: `${stats.mem_total_mb ? (stats.mem_used_mb / stats.mem_total_mb) * 100 : 0}%` }}></div>
                         </div>
                     </div>
                 </div>
@@ -136,6 +160,7 @@ const SettingsPage = () => {
                 </div>
 
             </div>
+            )}
         </div>
     );
 };

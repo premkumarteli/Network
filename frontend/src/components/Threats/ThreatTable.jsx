@@ -1,5 +1,3 @@
-import React from 'react';
-
 const ThreatTable = ({ threats }) => {
   return (
     <div className="activity-log">      

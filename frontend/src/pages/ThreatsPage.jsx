@@ -1,31 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { systemService } from '../services/api';
+import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
 import ThreatTable from '../components/Threats/ThreatTable';
 
 const ThreatsPage = () => {
     const [threats, setThreats] = useState([]);
+    const [threatCount, setThreatCount] = useState(0);
     const [loading, setLoading] = useState(true);
+
+    const fetchThreats = useCallback(async ({ background = false } = {}) => {
+        if (!background) {
+            setLoading(true);
+        }
+        try {
+            const [res, statsRes] = await Promise.all([
+                systemService.getAlerts({
+                    severity: 'HIGH,CRITICAL',
+                    resolved: false,
+                    hours: 24,
+                    limit: 100,
+                }),
+                systemService.getStats(),
+            ]);
+            setThreats(res.data || []);
+            setThreatCount(statsRes.data?.high_risk || 0);
+        } catch (err) {
+            console.error("Failed to fetch threats", err);
+        } finally {
+            if (!background) {
+                setLoading(false);
+            }
+        }
+    }, []);
 
     useEffect(() => {
         fetchThreats();
-        // Poll for threats every 10 seconds
-        const interval = setInterval(fetchThreats, 10000);
-        return () => clearInterval(interval);
-    }, []);
+    }, [fetchThreats]);
 
-    const fetchThreats = async () => {
-        try {
-            // Fetch alerts from the new backend
-            const res = await systemService.getAlerts();
-            // Filter high/critical severity on client for now if backend doesn't filter
-            const highRisk = res.data.filter(a => ['HIGH', 'CRITICAL'].includes(a.severity));
-            setThreats(highRisk);
-            setLoading(false);
-        } catch (err) {
-            console.error("Failed to fetch threats", err);
-            setLoading(false);
-        }
-    };
+    useVisibilityPolling(() => fetchThreats({ background: true }), 15000);
 
     return (
         <div className="animate-fade">
@@ -33,9 +45,9 @@ const ThreatsPage = () => {
                 <h2>Security Threats</h2>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     <span className="badge danger" style={{ fontSize: '1rem' }}>
-                        {threats.length} Active
+                        {threatCount} Active
                     </span>
-                    <button className="action-btn danger-hover" onClick={fetchThreats}>
+                    <button className="action-btn danger-hover" onClick={() => fetchThreats()}>
                         <i className="ri-refresh-line"></i> Refresh
                     </button>
                 </div>

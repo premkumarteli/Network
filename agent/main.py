@@ -10,41 +10,49 @@ import uuid
 import psutil
 import platform
 import ipaddress
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from scapy.all import sniff, IP, DNS, DNSQR
+from scapy.all import sniff, IP
 from colorama import Fore, Style
 import logging
+
+# Add parent directory to sys.path to allow importing modules from root
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from agent.device_detector import DeviceDetector
+from agent.dpi import WebInspectionController
+from agent.flow_manager import FlowManager, FlowSummary
+from agent.traffic_metadata import DomainHintCache, extract_flow_hints
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add parent directory to sys.path to allow importing modules from root
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from agent.flow_manager import FlowManager, FlowSummary
-from services.device_detector import DeviceDetector
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "agent.json"
+AGENT_RUNTIME_DIR = PROJECT_ROOT / "runtime" / "agent"
 
 # =========================================================
 # THREAD SAFE DEVICE INVENTORY (PERSISTENT)
 # =========================================================
 
 class DeviceInventory:
-    def __init__(self, storage_file="device_inventory.json"):
+    def __init__(self, storage_file=None):
         self.lock = threading.Lock()
-        self.storage_file = storage_file
+        AGENT_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        self.storage_file = Path(storage_file) if storage_file else AGENT_RUNTIME_DIR / "device_inventory.json"
         self.devices = {}
         self.load_inventory()
         threading.Thread(target=self._auto_save_worker, daemon=True).start()
 
     def load_inventory(self):
-        if os.path.exists(self.storage_file):
+        if self.storage_file.exists():
             try:
-                with open(self.storage_file, "r") as f:
+                with self.storage_file.open("r", encoding="utf-8") as f:
                     self.devices = json.load(f)
                     print(f"{Fore.GREEN}[+] Loaded {len(self.devices)} devices from inventory.")
-            except:
+            except Exception:
                 pass
 
     def _auto_save_worker(self):
@@ -55,9 +63,10 @@ class DeviceInventory:
     def save_inventory(self):
         try:
             with self.lock:
-                with open(self.storage_file, "w") as f:
+                self.storage_file.parent.mkdir(parents=True, exist_ok=True)
+                with self.storage_file.open("w", encoding="utf-8") as f:
                     json.dump(self.devices, f)
-        except:
+        except Exception:
             pass
 
     def update(self, ip, **kwargs):
@@ -89,8 +98,10 @@ class DeviceInventory:
 
 class NetworkAgent:
 
-    def __init__(self, config_path="core/config.json"):
+    def __init__(self, config_path=DEFAULT_CONFIG_PATH):
         self.config = self._load_config(config_path)
+        self.hostname = socket.gethostname()
+        self.agent_version = "v3.0-hybrid"
 
         url_config = self.config.get("server_url", "http://127.0.0.1:8000")
         base = url_config.rstrip("/")
@@ -99,18 +110,33 @@ class NetworkAgent:
 
         self.flow_url = base + "/api/v1/collect/flow/batch"
         self.heartbeat_url = base + "/api/v1/collect/heartbeat"
+        self.devices_url = base + "/api/v1/collect/devices/batch"
         self.policy_url = base + "/api/v1/policy"
+        self.web_policy_url = base + "/api/v1/collect/web-policy"
+        self.web_events_url = base + "/api/v1/collect/web-events/batch"
 
         self.agent_id = self._init_agent_id()
-        self.organization_id = self.config.get("organization_id", "default-org-id")
+        self.organization_id = self._resolve_initial_organization_id()
         self.api_key = os.getenv("AGENT_API_KEY") or self.config.get("api_key", "soc-agent-key-2026")
+        self.heartbeat_interval = int(os.getenv("NETVISOR_AGENT_HEARTBEAT_SECONDS", "10"))
+        self.web_proxy_port = int(os.getenv("NETVISOR_WEB_PROXY_PORT", "8899"))
+        self.web_policy_refresh_seconds = int(os.getenv("NETVISOR_WEB_POLICY_REFRESH_SECONDS", "30"))
         self.headers = {"X-API-Key": self.api_key}
+        self.local_ip = self._detect_local_ip()
+        self.local_mac = self._detect_local_mac()
 
         self.is_running = True
         self.verbose = True
         
         self.device_inventory = DeviceInventory()
-        self.device_detector = DeviceDetector()
+        self.device_detector = DeviceDetector(local_ip=self.local_ip)
+        self.local_network = self.device_detector.infer_local_network(self.local_ip)
+        if self.local_network:
+            self.device_detector.set_network(self.local_network)
+            logger.info("Discovery network set to %s", self.local_network)
+        else:
+            logger.warning("Unable to infer local network for ARP discovery; falling back to passive ARP cache only.")
+        self.domain_cache = DomainHintCache()
         self.probing_ips = set()
         
         # OUI Vendor Cache
@@ -142,25 +168,51 @@ class NetworkAgent:
         threading.Thread(target=self._discovery_engine, daemon=True).start()
         
         self._register_agent()
+        self.web_inspection = WebInspectionController(
+            runtime_dir=AGENT_RUNTIME_DIR / "mitm",
+            agent_id=self.agent_id,
+            device_ip=self.local_ip,
+            organization_id=self.organization_id,
+            headers=self.headers,
+            policy_url=self.web_policy_url,
+            upload_url=self.web_events_url,
+            proxy_port=self.web_proxy_port,
+            policy_refresh_seconds=self.web_policy_refresh_seconds,
+        )
+        self.web_inspection.start()
+        logger.info(
+            "Web inspection launchers ready: %s",
+            ", ".join(sorted((self.web_inspection.status_snapshot().get("launcher_paths") or {}).values())),
+        )
 
     def _init_agent_id(self):
-        id_file = "agent_id.txt"
-        if os.path.exists(id_file):
-            with open(id_file, "r") as f:
+        AGENT_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        id_file = AGENT_RUNTIME_DIR / "agent_id.txt"
+        if id_file.exists():
+            with id_file.open("r", encoding="utf-8") as f:
                 return f.read().strip()
         new_id = f"AGENT-{uuid.uuid4().hex[:8].upper()}"
-        with open(id_file, "w") as f:
+        with id_file.open("w", encoding="utf-8") as f:
             f.write(new_id)
         return new_id
 
     def _load_config(self, path):
         try:
-            if os.path.exists(path):
-                with open(path, "r") as f:
+            config_path = Path(path)
+            if config_path.exists():
+                with config_path.open("r", encoding="utf-8") as f:
                     return json.load(f)
-        except:
+        except Exception:
             pass
         return {}
+
+    def _resolve_initial_organization_id(self):
+        configured = (
+            self.config.get("organization_id")
+            or os.getenv("NETVISOR_ORGANIZATION_ID")
+            or os.getenv("NETVISOR_DEFAULT_ORGANIZATION_ID")
+        )
+        return configured or "default-org-id"
 
     def _register_agent(self):
         retry_delay = 1
@@ -168,9 +220,11 @@ class NetworkAgent:
             try:
                 payload = {
                     "agent_id": self.agent_id,
-                    "hostname": socket.gethostname(),
+                    "hostname": self.hostname,
                     "os": platform.system(),
-                    "version": "v3.0-hybrid",
+                    "version": self.agent_version,
+                    "device_ip": self.local_ip,
+                    "device_mac": self.local_mac,
                     "time": datetime.now().isoformat(),
                     "organization_id": self.organization_id
                 }
@@ -179,6 +233,9 @@ class NetworkAgent:
                 res = r.json()
                 if res.get("organization_id"):
                     self.organization_id = res["organization_id"]
+                    self.flow_manager.organization_id = self.organization_id
+                    if hasattr(self, "web_inspection"):
+                        self.web_inspection.update_context(organization_id=self.organization_id)
                 print(f"{Fore.GREEN}[+] Hybrid Flow Agent Registered: {self.agent_id}")
                 return
             except Exception as e:
@@ -198,12 +255,16 @@ class NetworkAgent:
     def process_packet(self, packet):
         """Phase 1: Direct packet to FlowManager for feature extraction."""
         try:
-            # Capture domain for flow correlation
-            if packet.haslayer(IP) and packet.haslayer(DNS) and packet.haslayer(DNSQR):
-                domain = packet[DNSQR].qname.decode(errors="ignore").strip(".")
-                packet.captured_domain = domain
-                if self.verbose:
-                    print(f"{Fore.CYAN}[DNS]{Style.RESET_ALL} {packet[IP].src} -> {domain}")
+            if packet.haslayer(IP):
+                hints = extract_flow_hints(packet, self.domain_cache)
+                domain = hints.get("domain")
+                sni = hints.get("sni")
+                if domain:
+                    packet.captured_domain = domain
+                    if self.verbose:
+                        print(f"{Fore.CYAN}[APP]{Style.RESET_ALL} {packet[IP].src} -> {domain}")
+                if sni:
+                    packet.captured_sni = sni
 
             self.flow_manager.update_from_packet(packet)
         except Exception as e:
@@ -241,34 +302,141 @@ class NetworkAgent:
                 ram = psutil.virtual_memory().percent
                 payload = {
                     "agent_id": self.agent_id,
+                    "hostname": self.hostname,
+                    "os": platform.system(),
+                    "version": self.agent_version,
+                    "device_ip": self.local_ip,
+                    "device_mac": self.local_mac,
                     "status": "online",
                     "dropped_packets": 0,
                     "cpu_usage": cpu,
                     "ram_usage": ram,
                     "inventory_size": len(self.device_inventory.devices),
                     "time": datetime.now().isoformat(),
-                    "organization_id": self.organization_id
+                    "organization_id": self.organization_id,
+                    "web_inspection": self.web_inspection.status_snapshot() if hasattr(self, "web_inspection") else {},
                 }
                 requests.post(self.heartbeat_url, json=payload, headers=self.headers, timeout=5)
-            except: pass
-            time.sleep(30)
+            except Exception:
+                pass
+            time.sleep(self.heartbeat_interval)
+
+    def _detect_local_ip(self):
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.connect(("10.255.255.255", 1))
+                return sock.getsockname()[0]
+            finally:
+                sock.close()
+        except Exception:
+            return "127.0.0.1"
+
+    def _detect_local_mac(self):
+        try:
+            node = uuid.getnode()
+            return ":".join(f"{(node >> shift) & 0xff:02x}" for shift in range(40, -1, -8))
+        except Exception:
+            return "-"
+
+    def _infer_os_family(self, hostname, device_type):
+        hostname_value = str(hostname or "").lower()
+        device_type_value = str(device_type or "").lower()
+
+        if "windows" in device_type_value or hostname_value.startswith(("desktop-", "laptop-", "win-", "msi-", "asus-")):
+            return "Windows"
+        if "linux" in device_type_value or "unix" in device_type_value:
+            return "Linux"
+        if "printer" in device_type_value:
+            return "Embedded"
+        if "synology" in hostname_value or "nas" in hostname_value:
+            return "Linux"
+        return "Unknown"
+
+    def _resolve_discovered_device(self, target):
+        ip, mac = target
+        existing = self.device_inventory.get(ip) or {}
+
+        hostname = existing.get("hostname")
+        if hostname in {None, "", "Unknown", "Unknown-Device"}:
+            hostname = self.device_detector.resolve_hostname(ip) or "Unknown"
+
+        device_type = existing.get("type")
+        if device_type in {None, "", "Unknown", "Unknown Type"}:
+            device_type = self.device_detector.detect_device_type(ip)
+        if device_type == "Unknown Type":
+            device_type = "Unknown"
+
+        vendor = self._resolve_vendor(mac)
+        os_family = existing.get("os")
+        if os_family in {None, "", "Unknown"}:
+            os_family = self._infer_os_family(hostname, device_type)
+
+        confidence = "high" if hostname != "Unknown" else "medium"
+        payload = {
+            "ip": ip,
+            "mac": mac,
+            "hostname": hostname,
+            "vendor": vendor,
+            "device_type": device_type,
+            "os_family": os_family,
+            "is_online": True,
+            "organization_id": self.organization_id,
+            "agent_id": self.agent_id,
+        }
+        return payload, confidence
+
+    def _sync_discovered_devices(self, devices):
+        if not devices:
+            return
+
+        try:
+            if self.verbose:
+                print(f"[*] Syncing {len(devices)} discovered devices...")
+            response = requests.post(
+                self.devices_url,
+                json=devices,
+                headers=self.headers,
+                timeout=10,
+            )
+            if response.status_code != 200:
+                print(f"{Fore.RED}[-] Device sync failed: {response.status_code} - {response.text}")
+            response.raise_for_status()
+        except Exception as exc:
+            logger.warning("Discovered device sync failed: %s", exc)
 
     # --- DISCOVERY ENGINE ---
     def _discovery_engine(self):
         while self.is_running:
             try:
-                arp_data = self.device_detector.parse_arp_table()
+                arp_data = self.device_detector.collect_arp_candidates(self.local_network)
+                candidates = []
                 for ip, mac in arp_data.items():
-                    # Filter for internal IPs only
                     try:
                         if not ipaddress.ip_address(ip).is_private:
                             continue
-                    except:
+                    except Exception:
                         continue
-                        
-                    vendor = self._resolve_vendor(mac)
-                    self.device_inventory.update(ip, mac=mac, vendor=vendor)
-            except: pass
+                    if ip == self.local_ip:
+                        continue
+                    candidates.append((ip, mac))
+
+                resolved_payloads = []
+                for payload, confidence in self.discovery_pool.map(self._resolve_discovered_device, candidates):
+                    resolved_payloads.append(payload)
+                    self.device_inventory.update(
+                        payload["ip"],
+                        mac=payload["mac"],
+                        hostname=payload["hostname"],
+                        vendor=payload["vendor"],
+                        type=payload["device_type"],
+                        os=payload["os_family"],
+                        confidence=confidence,
+                    )
+
+                self._sync_discovered_devices(resolved_payloads)
+            except Exception as exc:
+                logger.warning("Discovery cycle failed: %s", exc)
             time.sleep(60)
 
     def _resolve_vendor(self, mac):
@@ -278,6 +446,8 @@ class NetworkAgent:
 
     def stop(self):
         self.is_running = False
+        if hasattr(self, "web_inspection"):
+            self.web_inspection.stop()
         self.flow_manager.stop()
         self.device_inventory.save_inventory()
         sys.exit(0)
@@ -287,4 +457,4 @@ class NetworkAgent:
         sniff(prn=self.process_packet, store=False, promisc=True, timeout=timeout)
 
 if __name__ == "__main__":
-    NetworkAgent("core/config.json").start(timeout=60)
+    NetworkAgent(DEFAULT_CONFIG_PATH).start(timeout=60)

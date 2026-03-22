@@ -1,58 +1,90 @@
-import React, { useState, useEffect } from 'react';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import axios from 'axios';
 import MainLayout from './components/Layout/MainLayout';
-import Sidebar from './components/Layout/Sidebar';
 import Background from './components/Layout/Background';
-import DashboardPage from './pages/DashboardPage';
-import DevicesPage from './pages/DevicesPage';
-import ThreatsPage from './pages/ThreatsPage';
-import ActivityPage from './pages/ActivityPage';
-import SystemLogsPage from './pages/SystemLogsPage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import VPNPage from './pages/VPNPage';
-import SettingsPage from './pages/SettingsPage';
-import UserPage from './pages/UserPage';
+import PageTransition from './components/UI/PageTransition';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './hooks/useAuth';
 import './index.css';
 
-import { authService } from './services/api';
+import { ADMIN_ROLES, isAdminRole } from './utils/roles';
 
-const ProtectedRoute = () => {
-    const [auth, setAuth] = useState(null);
+const DashboardPage = lazy(() => import('./pages/DashboardPage'));
+const DevicesPage = lazy(() => import('./pages/DevicesPage'));
+const ThreatsPage = lazy(() => import('./pages/ThreatsPage'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage'));
+const ApplicationsPage = lazy(() => import('./pages/ApplicationsPage'));
+const ApplicationDevicesPage = lazy(() => import('./pages/ApplicationDevicesPage'));
+const AgentDetailsPage = lazy(() => import('./pages/AgentDetailsPage'));
+const SystemLogsPage = lazy(() => import('./pages/SystemLogsPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
+const RegisterPage = lazy(() => import('./pages/RegisterPage'));
+const VPNPage = lazy(() => import('./pages/VPNPage'));
+const SettingsPage = lazy(() => import('./pages/SettingsPage'));
+const UserPage = lazy(() => import('./pages/UserPage'));
 
-    useEffect(() => {
-        authService.getCurrentUser()
-            .then(res => setAuth(res.data.authenticated))
-            .catch(() => setAuth(false));
-    }, []);
+const ProtectedRoute = ({ allowedRoles = null }) => {
+    const { user, loading } = useAuth();
 
-    if (auth === null) return <div className="loading-state">Authenticating...</div>;
-    return auth ? <Outlet /> : <Navigate to="/login" />;
+    if (loading) return <div className="loading-state">Authenticating...</div>;
+    if (!user) return <Navigate to="/login" replace />;
+    if (allowedRoles && !allowedRoles.includes(user.role)) {
+        return <Navigate to={isAdminRole(user.role) ? "/dashboard" : "/user"} replace />;
+    }
+    return <Outlet />;
 };
+
+const HomeRedirect = () => {
+    const { user } = useAuth();
+    return <Navigate to={isAdminRole(user?.role) ? "/dashboard" : "/user"} replace />;
+};
+
+const RouteLoader = () => (
+  <div className="loading-state route-loading-state">
+    Loading workspace...
+  </div>
+);
+
+const pageElement = (Component) => (
+  <PageTransition>
+    <Suspense fallback={<RouteLoader />}>
+      <Component />
+    </Suspense>
+  </PageTransition>
+);
 
 function App() {
   return (
-    <BrowserRouter>
-         <Background />
-         <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                
-                <Route element={<ProtectedRoute />}>
-                    <Route element={<MainLayout />}>
-                        <Route path="/" element={<DashboardPage />} />
-                        <Route path="/devices" element={<DevicesPage />} />
-                        <Route path="/threats" element={<ThreatsPage />} />
-                        <Route path="/activity" element={<ActivityPage />} />
-                        <Route path="/logs" element={<SystemLogsPage />} />
-                        <Route path="/vpn" element={<VPNPage />} />
-                        <Route path="/settings" element={<SettingsPage />} />
-                        <Route path="/user" element={<UserPage />} />
-                    </Route>
-                </Route>
-            </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Background />
+        <Routes>
+          <Route path="/login" element={pageElement(LoginPage)} />
+          <Route path="/register" element={pageElement(RegisterPage)} />
+
+          <Route element={<ProtectedRoute />}>
+            <Route element={<MainLayout />}>
+              <Route path="/" element={<HomeRedirect />} />
+              <Route path="/user" element={pageElement(UserPage)} />
+
+              <Route element={<ProtectedRoute allowedRoles={ADMIN_ROLES} />}>
+                <Route path="/dashboard" element={pageElement(DashboardPage)} />
+                <Route path="/devices" element={pageElement(DevicesPage)} />
+                <Route path="/user/:deviceIp" element={pageElement(UserPage)} />
+                <Route path="/apps" element={pageElement(ApplicationsPage)} />
+                <Route path="/apps/:appName" element={pageElement(ApplicationDevicesPage)} />
+                <Route path="/threats" element={pageElement(ThreatsPage)} />
+                <Route path="/activity" element={pageElement(ActivityPage)} />
+                <Route path="/logs" element={pageElement(SystemLogsPage)} />
+                <Route path="/agents/:agentId" element={pageElement(AgentDetailsPage)} />
+                <Route path="/vpn" element={pageElement(VPNPage)} />
+                <Route path="/settings" element={pageElement(SettingsPage)} />
+              </Route>
+            </Route>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

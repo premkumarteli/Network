@@ -1,46 +1,107 @@
-# Project Overview
-This project is a comprehensive network management solution designed to help users efficiently manage their network infrastructure.
+# NetVisor
 
-# Features
-- Real-time network monitoring
-- Automated alerts for network issues
-- Network performance analytics
-- Easy-to-use interface
+NetVisor is a self-hosted network threat detection platform for mixed device
+environments:
 
-# Quick Start Guide
-1. Clone the repository: `git clone https://github.com/premkumarteli/Network.git`
-2. Navigate to the project directory: `cd Network`
-3. Install dependencies: `npm install`
-4. Start the application: `npm start`
+- managed endpoints send deeper flow data through the local agent
+- BYOD traffic is observed through the metadata-only gateway
+- the backend scores activity and serves the React SOC dashboard
 
-# Project Structure
-- `src/`: Contains the source code.
-- `docs/`: Documentation files.
-- `tests/`: Unit tests.
+## Canonical Layout
 
-# Configuration
-Configuration files can be found in the `config/` directory. You can modify the settings according to your environment.
+```text
+Network/
+|- app/                    # FastAPI backend package
+|  |- api/                 # HTTP route handlers
+|  |- core/                # settings, auth, shared dependencies
+|  |- db/                  # DB connection/bootstrap
+|  |- ml/                  # ML model runtime
+|  |- schemas/             # request/response schemas
+|  |- services/            # business logic and detectors
+|  |- main.py              # backend ASGI entrypoint
+|  `- realtime.py          # Socket.IO wiring
+|- agent/                  # managed-device agent
+|- gateway/                # gateway packet collector
+|- config/                 # checked-in runtime config
+|- database/               # schema bootstrap SQL
+|- deployment/             # deployment assets
+|- docs/                   # product and architecture specs
+|- frontend/               # React/Vite UI
+|- legacy/                 # archived pre-MVP code
+|- runtime/                # generated runtime state and backups
+|- scripts/                # canonical startup scripts
+|- tests/                  # automated tests
+|- run_server.py           # convenience launcher
+|- run_agent.py            # convenience launcher
+`- run_gateway.py          # convenience launcher
+```
 
-# API Documentation
-Refer to the `docs/api.md` for detailed API documentation.
+## Entry Points
 
-# Security Features
-- Role-based access control
-- HTTPS for secure data transmission
-- Regular security audits and updates
+Preferred:
 
-# Testing
-Run the tests with the command: `npm test`.
+- `python scripts/run_server.py`
+- `python scripts/run_agent.py`
+- `python scripts/run_gateway.py`
 
-# Performance Improvements
-Known performance optimizations include lazy loading and efficient data caching.
+Convenience wrappers:
 
-# Known Issues
-- Issue #1: Application may hang on slow networks.
-- Issue #2: Some features may not be fully responsive on mobile devices.
+- `python run_server.py`
+- `python run_agent.py`
+- `python run_gateway.py`
 
-# Contributing Guidelines
-Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
+## Environment
 
-# Support Information
-For support, please contact [support@network.com](mailto:support@network.com).
+Copy `.env.example` to `.env` and set at least:
+
+- `NETVISOR_SECRET_KEY`
+- `NETVISOR_DB_HOST`
+- `NETVISOR_DB_USER`
+- `NETVISOR_DB_PASSWORD`
+- `NETVISOR_DB_NAME`
+- `NETVISOR_BOOTSTRAP_ADMIN_PASSWORD`
+- `AGENT_API_KEY`
+- `GATEWAY_API_KEY`
+
+Optional runtime tuning:
+
+- `NETVISOR_AGENT_HEARTBEAT_SECONDS`
+- `NETVISOR_GATEWAY_HEARTBEAT_SECONDS`
+- `NETVISOR_RESET_RUNTIME_ON_STARTUP`
+- `NETVISOR_BACKUP_AND_RESET_ON_SHUTDOWN`
+
+## Database Setup
+
+Create or rebuild the schema:
+
+```powershell
+mysql -u root -p < database\init.sql
+```
+
+## Development Checks
+
+Backend tests:
+
+```powershell
+python -m pytest -q -p no:cacheprovider
+```
+
+Frontend lint/build:
+
+```powershell
+cd frontend
+npm run lint
+npm run build
+```
+
+## Runtime Notes
+
+- Local runtime state is written under `runtime/`.
+- Runtime backups are exported as CSV under `runtime/backups/server/`.
+- The backend API root is `/api/v1`.
+- Device status is derived from `last_seen`, not from ping:
+  - `Online` < 10 seconds
+  - `Idle` < 60 seconds
+  - `Offline` otherwise
+- Application sessions are derived from flow segments and refresh every few
+  seconds after agent/gateway activity arrives.

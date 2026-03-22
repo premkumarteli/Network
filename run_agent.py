@@ -1,14 +1,12 @@
 from agent.main import NetworkAgent
-import os
-from dotenv import load_dotenv
+from pathlib import Path
+from dotenv.main import load_dotenv
 
 if __name__ == "__main__":
     load_dotenv()
-    # Check if core/config.json exists
-    config_path = "core/config.json"
-    if not os.path.exists(config_path):
-        # Fallback for when running from a different folder
-        config_path = os.path.join(os.path.dirname(__file__), "core", "config.json")
-        
+    config_path = Path(__file__).resolve().parent / "config" / "agent.json"
+    if not config_path.exists():
+        raise FileNotFoundError(f"Missing agent config: {config_path}")
+
     print(f"[*] Starting SOC Agent using config: {config_path}")
     NetworkAgent(config_path).start()

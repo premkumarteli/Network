@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../hooks/useAuth';
 import { authService } from '../services/api';
 
 const LoginPage = () => {
@@ -7,6 +8,7 @@ const LoginPage = () => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const navigate = useNavigate();
+    const { refreshUser } = useAuth();
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -14,6 +16,7 @@ const LoginPage = () => {
             const res = await authService.login({ username, password });
             if (res.data.access_token) {
                 localStorage.setItem('access_token', res.data.access_token);
+                await refreshUser();
                 navigate('/');
             } else {
                 setError('Login failed: No access token received');
