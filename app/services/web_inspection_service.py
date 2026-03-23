@@ -7,6 +7,7 @@ from typing import Any, Optional
 
 from ..core.config import settings
 from ..utils.domain_utils import get_base_domain, normalize_host
+from .domain_intelligence import classify_domain, is_noise
 
 logger = logging.getLogger("netvisor.web_inspection")
 
@@ -388,6 +389,12 @@ class WebInspectionService:
         if not device_ip or not agent_id:
             return None
 
+        base_domain = str(event.get("base_domain") or "")
+        if is_noise(base_domain):
+            return None
+
+        content_category = classify_domain(base_domain)
+
         first_seen = self._parse_timestamp(event.get("first_seen")) or datetime.now(timezone.utc)
         last_seen = self._parse_timestamp(event.get("last_seen")) or first_seen
         organization_id = event.get("organization_id")
@@ -398,9 +405,9 @@ class WebInspectionService:
             str(event.get("process_name") or "unknown"),
             str(event.get("browser_name") or "Unknown"),
             str(event.get("page_url") or ""),
-            str(event.get("base_domain") or ""),
+            base_domain,
             str(event.get("page_title") or "Untitled")[:255],
-            str(event.get("content_category") or "web")[:100],
+            content_category,
             str(event.get("content_id") or "")[:255] or None,
             str(event.get("http_method") or "GET")[:16],
             int(event.get("status_code")) if event.get("status_code") not in (None, "") else None,
@@ -526,7 +533,7 @@ class WebInspectionService:
         db_conn,
         *,
         organization_id: Optional[str],
-        limit: int = 50,
+        limit: int = 100,
     ) -> list[dict]:
         self.ensure_schema(db_conn)
         self.purge_expired_events(db_conn)
@@ -554,7 +561,8 @@ class WebInspectionService:
                     first_seen,
                     last_seen
                 FROM web_events
-                WHERE (%s IS NULL OR organization_id = %s OR organization_id IS NULL)
+                WHERE base_domain IS NOT NULL AND base_domain != ''
+                  AND (%s IS NULL OR organization_id = %s OR organization_id IS NULL)
                 ORDER BY last_seen DESC, id DESC
                 LIMIT %s
                 """,

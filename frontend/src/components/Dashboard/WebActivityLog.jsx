@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback } from 'react';
 import { systemService } from '../../services/api';
 import { useVisibilityPolling } from '../../hooks/useVisibilityPolling';
 
+const IMPORTANT_DOMAINS = [
+  "youtube.com",
+  "googlevideo.com",
+  "ytimg.com",
+  "web.whatsapp.com",
+  "chatgpt.com",
+  "openai.com",
+  "github.com",
+  "instagram.com",
+  "facebook.com"
+];
+
 const WebActivityLog = () => {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -9,13 +21,14 @@ const WebActivityLog = () => {
 
   const fetchWebActivity = useCallback(async () => {
     try {
-      const response = await systemService.getGlobalWebActivity(15);
+      const response = await systemService.getGlobalWebActivity(100);
       if (response.data && response.data.activity) {
         setEvents(response.data.activity);
       }
       setError(null);
     } catch (err) {
       console.error('Failed to fetch web activity:', err);
+      setError('Failed to fetch web activity. See console for details.');
     } finally {
       if (loading) setLoading(false);
     }
@@ -29,11 +42,24 @@ const WebActivityLog = () => {
 
   const getCategoryBadge = (category) => {
     const cat = (category || 'web').toLowerCase();
-    if (cat.includes('video')) return <span className="badge danger"><i className="ri-youtube-fill"></i> {category}</span>;
-    if (cat.includes('repo') || cat.includes('code')) return <span className="badge neutral"><i className="ri-github-fill"></i> {category}</span>;
-    if (cat.includes('chat') || cat.includes('ai')) return <span className="badge success"><i className="ri-message-3-fill"></i> {category}</span>;
-    if (cat.includes('search')) return <span className="badge primary"><i className="ri-search-line"></i> {category}</span>;
-    return <span className="badge neutral"><i className="ri-global-line"></i> {category}</span>;
+    switch (cat) {
+      case 'video':
+        return <span className="badge warning"><i className="ri-youtube-line"></i> {category}</span>;
+      case 'chat':
+        return <span className="badge primary"><i className="ri-whatsapp-line"></i> {category}</span>;
+      case 'ai':
+        return <span className="badge success"><i className="ri-robot-line"></i> {category}</span>;
+      case 'dev':
+        return <span className="badge neutral"><i className="ri-github-line"></i> {category}</span>;
+      case 'system':
+        return <span className="badge muted"><i className="ri-settings-3-line"></i> {category}</span>;
+      default:
+        return <span className="badge neutral"><i className="ri-global-line"></i> {category}</span>;
+    }
+  };
+
+  const isImportantDomain = (domain) => {
+    return IMPORTANT_DOMAINS.some(importantDomain => domain.includes(importantDomain));
   };
 
   const parseTime = (ts) => {
@@ -41,6 +67,13 @@ const WebActivityLog = () => {
     const d = new Date(ts);
     return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString();
   };
+
+  const filteredEvents = events.filter(e =>
+    e.base_domain &&
+    !e.base_domain.includes("microsoft") &&
+    !e.base_domain.includes("googleapis") &&
+    !e.base_domain.includes("firebaselogging")
+  );
 
   return (
     <div className="activity-log">
@@ -53,11 +86,11 @@ const WebActivityLog = () => {
         <div className="empty-panel">
           <p className="danger">{error}</p>
         </div>
-      ) : events.length === 0 && !loading ? (
+      ) : filteredEvents.length === 0 && !loading ? (
         <div className="empty-panel" style={{ padding: '3rem 1rem' }}>
-          <h4>No Web Activity Detected</h4>
+          <h4>No Relevant Web Activity</h4>
           <p className="muted" style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>
-            Enable DPI proxy on a device to analyze HTTPS traffic.
+            System is monitoring for important events. User activity will appear here.
           </p>
         </div>
       ) : (
@@ -71,8 +104,8 @@ const WebActivityLog = () => {
             </tr>
           </thead>
           <tbody>
-            {events.map((event, idx) => (
-              <tr key={idx} className="clickable-row fade-in" style={{animationDelay: `${idx * 0.05}s`}}>
+            {filteredEvents.map((event, idx) => (
+              <tr key={idx} className={`clickable-row fade-in ${isImportantDomain(event.base_domain) ? 'strong' : ''}`} style={{animationDelay: `${idx * 0.05}s`}}>
                 <td className="mono" title={event.page_url}>
                   <div className="table-primary">{event.base_domain}</div>
                   <div className="table-meta">{parseTime(event.last_seen || event.first_seen)}</div>
