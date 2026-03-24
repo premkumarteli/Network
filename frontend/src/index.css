@@ -111,18 +111,6 @@ body {
     radial-gradient(circle at 50% -20%, #0f172a 0%, var(--bg-dark) 100%);
 }
 
-.ambient-background__grid {
-  position: absolute;
-  inset: 0;
-  background-image: 
-    linear-gradient(rgba(0, 245, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
-  background-size: 60px 60px;
-  mask-image: radial-gradient(circle at 50% 50%, black, transparent 90%);
-  pointer-events: none;
-  z-index: -2;
-}
-
 .ambient-background__glow {
   position: absolute;
   width: 45rem;
@@ -141,16 +129,17 @@ body {
 
 .ambient-background__dot {
   position: absolute;
-  width: var(--size, 4px);
-  height: var(--size, 4px);
+  width: var(--size, 6px);
+  height: var(--size, 6px);
   background: var(--primary);
   border-radius: 50%;
-  opacity: var(--opacity, 0.7);
-  filter: blur(0.5px) drop-shadow(0 0 8px var(--primary));
+  opacity: var(--opacity, 0.8);
+  filter: blur(0.5px) drop-shadow(0 0 10px var(--primary));
   animation: drop var(--duration) linear infinite;
   animation-delay: var(--delay, 0s);
   left: var(--left);
-  top: -20px;
+  top: -30px;
+  will-change: transform, opacity;
 }
 
 .glass-panel {
