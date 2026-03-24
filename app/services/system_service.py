@@ -30,8 +30,12 @@ class SystemService:
         self._volatile_runtime_files = (
             runtime_root / "agent" / "device_inventory.json",
         )
+        self._schema_ready = False
 
     def ensure_tables(self, db_conn) -> None:
+        if self._schema_ready:
+            return
+
         cursor = db_conn.cursor()
         try:
             cursor.execute(

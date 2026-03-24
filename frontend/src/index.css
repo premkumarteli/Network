@@ -1,30 +1,30 @@
-﻿:root {
+:root {
   /* Core Colors */
   --bg-dark: #000000;
   --bg-card: rgba(11, 15, 26, 0.7);
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-surface: rgba(255, 255, 255, 0.03);
 
-  /* Neon Accents - Glows Removed */
+  /* Neon Accents - Glows Restored */
   --primary: #00f5ff;
   /* Cyan Neon */
-  --primary-glow: transparent;
+  --primary-glow: rgba(0, 245, 255, 0.15);
 
   --secondary: #8b5cf6;
   /* Violet */
-  --secondary-glow: transparent;
+  --secondary-glow: rgba(139, 92, 246, 0.15);
 
   --danger: #ff2a2a;
   /* Red Neon */
-  --danger-glow: transparent;
+  --danger-glow: rgba(255, 42, 42, 0.15);
 
   --success: #00ff9d;
   /* Green Neon */
-  --success-glow: transparent;
+  --success-glow: rgba(0, 255, 157, 0.15);
 
   --warning: #ffbf00;
   /* Amber Neon */
-  --warning-glow: transparent;
+  --warning-glow: rgba(255, 191, 0, 0.15);
 
   /* Text */
   --text-main: #ffffff;
@@ -104,47 +104,90 @@ body {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background:
-    radial-gradient(circle at top left, rgba(6, 182, 212, 0.08), transparent 28%),
-    radial-gradient(circle at top right, rgba(139, 92, 246, 0.08), transparent 24%),
-    radial-gradient(circle at bottom center, rgba(37, 99, 235, 0.06), transparent 30%);
-}
-
-.ambient-background__grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(148, 163, 184, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
-  background-size: 120px 120px;
-  mask-image: radial-gradient(circle at center, black, transparent 85%);
+  background-color: var(--bg-dark);
+  background: 
+    radial-gradient(circle at 20% 30%, rgba(6, 182, 212, 0.18), transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(139, 92, 246, 0.15), transparent 45%),
+    radial-gradient(circle at 50% -20%, #0f172a 0%, var(--bg-dark) 100%);
 }
 
 .ambient-background__glow {
   position: absolute;
-  width: 34rem;
-  height: 34rem;
-  border-radius: 999px;
-  filter: blur(80px);
-  opacity: 0.18;
+  width: 45rem;
+  height: 45rem;
+  border-radius: 50%;
+  filter: blur(140px);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.ambient-background__dots {
+  position: absolute;
+  inset: 0;
+  perspective: 1000px;
+}
+
+.ambient-background__dot {
+  position: absolute;
+  width: var(--size, 4px);
+  height: var(--size, 4px);
+  background: var(--primary);
+  border-radius: 50%;
+  opacity: var(--opacity, 0.7);
+  filter: blur(0.5px) drop-shadow(0 0 8px var(--primary));
+  animation: drop var(--duration) linear infinite;
+  animation-delay: var(--delay, 0s);
+  left: var(--left);
+  top: -20px;
+}
+
+.glass-panel {
+  background: var(--bg-card);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  transition: border-color 0.3s ease;
+}
+
+.glass-panel:hover {
+  border-color: rgba(6, 182, 212, 0.2);
+}
+
+@keyframes drop {
+  0% {
+    transform: translateY(0);
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.6;
+  }
+  90% {
+    opacity: 0.6;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
 }
 
 .ambient-background__glow--cyan {
   top: -10rem;
   left: -8rem;
-  background: rgba(6, 182, 212, 0.55);
+  background: rgba(6, 182, 212, 0.45);
 }
 
 .ambient-background__glow--violet {
   top: 12rem;
   right: -12rem;
-  background: rgba(139, 92, 246, 0.45);
+  background: rgba(139, 92, 246, 0.35);
 }
 
 .ambient-background__glow--blue {
   bottom: -14rem;
   left: 32%;
-  background: rgba(37, 99, 235, 0.4);
+  background: rgba(37, 99, 235, 0.3);
 }
 
 /* --- Typography --- */
@@ -170,6 +213,7 @@ h6 {
   min-height: 100vh;
   position: relative;
   z-index: 1;
+  background: transparent;
 }
 
 /* --- Sidebar --- */
@@ -246,6 +290,7 @@ h6 {
   padding: 2rem;
   position: relative;
   width: calc(100% - var(--sidebar-width)); /* Ensure it doesn't overflow */
+  background: transparent;
 }
 
 /* --- Collapsed State --- */
@@ -1476,6 +1521,61 @@ tr:hover td {
   background: var(--primary);
 }
 
-.slider.round {
-  border-radius: 999px;
+
+/* --- DPI Dashboard Empty State --- */
+.empty-dashboard-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 2rem;
+  background: var(--glass-bg);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-card);
+  margin-top: 2rem;
+}
+
+.empty-dashboard-state .empty-icon {
+  font-size: 3rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.empty-dashboard-state h3 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.empty-dashboard-state .empty-help {
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.empty-dashboard-state ul {
+  list-style: none;
+  padding: 0;
+  margin-top: 1rem;
+  text-align: left;
+  display: inline-block;
+}
+
+.empty-dashboard-state li {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.empty-dashboard-state li i {
+  color: var(--primary);
+}
+
+.bg-highlight {
+  background: rgba(0, 247, 255, 0.05) !important;
+  transition: background 1s ease;
 }

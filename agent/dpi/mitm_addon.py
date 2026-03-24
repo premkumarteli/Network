@@ -1,10 +1,15 @@
-from __future__ import annotations
-
+import sys
+from pathlib import Path
 import json
 import os
 import re
 from html import unescape
 from urllib.parse import parse_qs, urlsplit
+
+# Add project root to sys.path to allow importing from 'app'
+root = Path(__file__).resolve().parent.parent.parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
 
 from app.utils.domain_utils import get_base_domain, normalize_host
 
@@ -40,22 +45,36 @@ def extract_page_title(body: str | bytes | None) -> str | None:
     return None
 
 
-def extract_site_metadata(url: str, page_title: str | None) -> tuple[str, str | None]:
+def extract_site_metadata(url: str, page_title: str | None) -> tuple[str, str | None, str | None]:
+    """Returns (category, content_id, search_query)"""
     split = urlsplit(url or "")
-    base_domain = get_base_domain(split.netloc) or split.netloc
+    host = normalize_host(split.netloc)
+    base_domain = get_base_domain(host) or host
     query = parse_qs(split.query)
 
+    if base_domain in {"google.com", "google.co.in", "www.google.com"}:
+        q = (query.get("q") or [None])[0]
+        return "search", None, q
+    
+    if base_domain == "bing.com":
+        q = (query.get("q") or [None])[0]
+        return "search", None, q
+
     if base_domain == "youtube.com":
-        return "video", (query.get("v") or [None])[0]
+        return "video", (query.get("v") or [None])[0], None
+    
     if base_domain == "googlevideo.com":
-        return "video-stream", (query.get("id") or [None])[0]
+        return "video-stream", (query.get("id") or [None])[0], None
+    
     if base_domain in {"openai.com", "chatgpt.com"}:
-        return "chat", None
+        return "chat", None, None
+    
     if base_domain == "github.com":
         path = split.path.strip("/").split("/")
         if len(path) >= 2:
-            return "repository", "/".join(path[:2])
-    return "web", None
+            return "repository", "/".join(path[:2]), None
+            
+    return "web", None, None
 
 
 def build_event(flow) -> dict | None:
@@ -86,7 +105,7 @@ def build_event(flow) -> dict | None:
         page_title = extract_page_title(raw_content[:32768])
 
     url = getattr(request, "pretty_url", None) or getattr(request, "url", None) or ""
-    content_category, content_id = extract_site_metadata(url, page_title)
+    content_category, content_id, search_query = extract_site_metadata(url, page_title)
     if not page_title:
         page_title = content_id or split_url_label(url)
 
@@ -103,12 +122,24 @@ def build_event(flow) -> dict | None:
         browser_name = "Edge"
     elif "chrome/" in lowered_user_agent:
         browser_name = "Chrome"
+    elif "firefox/" in lowered_user_agent:
+        browser_name = "Firefox"
+    elif "safari/" in lowered_user_agent:
+        browser_name = "Safari"
 
     process_name = "unknown"
     if browser_name == "Chrome":
         process_name = "chrome.exe"
     elif browser_name == "Edge":
         process_name = "msedge.exe"
+    elif browser_name == "Firefox":
+        process_name = "firefox.exe"
+    elif browser_name == "Safari":
+        process_name = "safari.exe"
+    
+    # Fallback to python.exe if it's the agent itself testing
+    if "python" in lowered_user_agent:
+        process_name = "python.exe"
 
     return {
         "browser_name": browser_name,
@@ -118,6 +149,7 @@ def build_event(flow) -> dict | None:
         "page_title": page_title or "Untitled",
         "content_category": content_category,
         "content_id": content_id,
+        "search_query": search_query,
         "http_method": getattr(request, "method", "GET"),
         "status_code": getattr(response, "status_code", None),
         "content_type": content_type or None,

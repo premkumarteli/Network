@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { systemService } from '../services/api';
 import { useVisibilityPolling } from '../hooks/useVisibilityPolling';
+import { useWebSocket } from '../hooks/useWebSocket';
 import DeviceTable from '../components/Devices/DeviceTable';
 import KpiCard from '../components/UI/KpiCard';
 import { StatGridSkeleton, TableSkeleton } from '../components/UI/Skeletons';
@@ -35,7 +36,24 @@ const DevicesPage = () => {
 
     useVisibilityPolling(() => {
         fetchDevices({ background: true });
-    }, 15000);
+    }, 5000);
+
+    const handleDeviceEvent = useCallback((eventData) => {
+        const update = eventData?.data;
+        if (!update || !update.ip) return;
+        setDevices(prev => {
+            const idx = prev.findIndex(d => d.ip === update.ip);
+            if (idx >= 0) {
+                const newDevices = [...prev];
+                newDevices[idx] = { ...newDevices[idx], ...update };
+                return newDevices;
+            } else {
+                return [update, ...prev];
+            }
+        });
+    }, []);
+
+    useWebSocket('device_event', handleDeviceEvent);
 
     const namedDevices = devices.filter((device) => !['Unknown', 'Unknown-Device', '', null, undefined].includes(device.hostname)).length;
     const managedCount = devices.filter((device) => device.management_mode === 'managed').length;

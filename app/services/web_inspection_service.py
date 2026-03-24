@@ -13,8 +13,12 @@ logger = logging.getLogger("netvisor.web_inspection")
 
 
 class WebInspectionService:
-    DEFAULT_ALLOWED_PROCESSES = ["chrome.exe", "msedge.exe"]
+    DEFAULT_ALLOWED_PROCESSES = ["chrome.exe", "msedge.exe", "firefox.exe", "python.exe"]
     DEFAULT_ALLOWED_DOMAINS = [
+        "google.com",
+        "bing.com",
+        "duckduckgo.com",
+        "yahoo.com",
         "youtube.com",
         "googlevideo.com",
         "youtubei.googleapis.com",
@@ -116,7 +120,7 @@ class WebInspectionService:
         return {
             "agent_id": agent_id,
             "device_ip": device_ip,
-            "inspection_enabled": False,
+            "inspection_enabled": True,
             "allowed_processes": list(self.DEFAULT_ALLOWED_PROCESSES),
             "allowed_domains": list(self.DEFAULT_ALLOWED_DOMAINS),
             "snippet_max_bytes": self.DEFAULT_SNIPPET_MAX_BYTES,
@@ -160,6 +164,7 @@ class WebInspectionService:
                     page_title VARCHAR(255) DEFAULT 'Untitled',
                     content_category VARCHAR(100) DEFAULT 'web',
                     content_id VARCHAR(255) NULL,
+                    search_query VARCHAR(255) NULL,
                     http_method VARCHAR(16) DEFAULT 'GET',
                     status_code INT NULL,
                     content_type VARCHAR(120) NULL,
@@ -409,6 +414,7 @@ class WebInspectionService:
             str(event.get("page_title") or "Untitled")[:255],
             content_category,
             str(event.get("content_id") or "")[:255] or None,
+            str(event.get("search_query") or "")[:255] or None,
             str(event.get("http_method") or "GET")[:16],
             int(event.get("status_code")) if event.get("status_code") not in (None, "") else None,
             str(event.get("content_type") or "")[:120] or None,
@@ -445,6 +451,7 @@ class WebInspectionService:
                     page_title,
                     content_category,
                     content_id,
+                    search_query,
                     http_method,
                     status_code,
                     content_type,
@@ -455,7 +462,7 @@ class WebInspectionService:
                     first_seen,
                     last_seen
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 rows,
             )

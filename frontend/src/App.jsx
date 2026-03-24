@@ -71,6 +71,7 @@ function App() {
                 <Route path="/dashboard" element={pageElement(DashboardPage)} />
                 <Route path="/devices" element={pageElement(DevicesPage)} />
                 <Route path="/user/:deviceIp" element={pageElement(UserPage)} />
+                <Route path="/dpi" element={pageElement(lazy(() => import('./pages/DpiDashboard.jsx')))} />
                 <Route path="/apps" element={pageElement(ApplicationsPage)} />
                 <Route path="/apps/:appName" element={pageElement(ApplicationDevicesPage)} />
                 <Route path="/threats" element={pageElement(ThreatsPage)} />

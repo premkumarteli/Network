@@ -63,7 +63,7 @@ class WebInspectionController:
         )
         self.proxy_manager = ProxyManager(
             runtime_dir=self.runtime_dir,
-            addon_path=Path(__file__).with_name("mitm_addon.py"),
+            addon_path=Path(__file__).with_name("mitm_addon.py").resolve(),
             port=self.proxy_port,
             on_event=self.event_buffer.enqueue,
         )
@@ -89,6 +89,9 @@ class WebInspectionController:
             return
         self._running = True
         self._status["launcher_paths"] = self.browser_launcher.create_wrappers()
+        logger.info("[DPI] Web inspection launchers created in: %s", self.runtime_dir)
+        for name, path in self._status["launcher_paths"].items():
+             logger.info("[DPI]   -> %s: %s", name, path)
         self.event_buffer.start()
         self.refresh_policy()
         self._policy_thread.start()

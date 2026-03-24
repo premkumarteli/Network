@@ -1,0 +1,72 @@
+.dpi-dashboard {
+  padding: 2rem;
+}
+
+.dpi-status-header {
+  display: flex;
+  justify-content: space-around;
+  padding: 1.5rem;
+  background: var(--bg-card);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  margin-bottom: 2rem;
+}
+
+.dpi-filters {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.dpi-filters input,
+.dpi-filters select {
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  color: var(--text-main);
+  outline: none;
+  transition: all 0.2s;
+}
+
+.dpi-filters input:focus,
+.dpi-filters select:focus {
+  border-color: var(--primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dpi-event-table table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dpi-event-table th,
+.dpi-event-table td {
+  padding: 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.dpi-event-table thead {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.highlight {
+  background-color: #e6fffa; /* A light green highlight */
+  transition: background-color 0.5s ease;
+}
+
+.empty {
+  padding: 2rem;
+  text-align: center;
+  color: #888;
+}
+
+.status-allowed {
+  color: green;
+}
+
+.status-blocked {
+  color: red;
+}

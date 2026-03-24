@@ -6,7 +6,13 @@ from ..utils.network import classify_ip_scope, normalize_ip
 
 
 class ExternalEndpointService:
+    def __init__(self) -> None:
+        self._schema_ready = False
+
     def ensure_table(self, db_conn) -> None:
+        if self._schema_ready:
+            return
+
         cursor = db_conn.cursor()
         try:
             cursor.execute(

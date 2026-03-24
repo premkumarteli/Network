@@ -8,15 +8,17 @@ const ApplicationDevicesPage = () => {
     const navigate = useNavigate();
     const { appName } = useParams();
     const decodedAppName = decodeURIComponent(appName || 'Other');
-    const [devices, setDevices] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [events, setEvents] = useState([]);
 
     const fetchDevices = useCallback(async () => {
         try {
             const res = await systemService.getAppDevices(decodedAppName);
             setDevices(res.data?.devices || []);
+            const eventsRes = await systemService.getAppDpiEvents(decodedAppName);
+            setEvents(eventsRes.data?.activity || []);
         } catch (err) {
-            console.error('Failed to fetch application devices', err);
+            console.error('Failed to fetch application devices or events', err);
         } finally {
             setLoading(false);
         }
@@ -153,6 +155,37 @@ const ApplicationDevicesPage = () => {
                                     </tr>
                                 ))
                             )}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+
+            {!loading && events.length > 0 && (
+                <div className="activity-log mt-6">
+                    <div className="section-title-row">
+                        <h3>{decodedAppName} Web Activity</h3>
+                        <span className="table-caption">Recent DPI inspections for this app</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Device IP</th>
+                                <th>Domain</th>
+                                <th>Title</th>
+                                <th>Search Query</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {events.map((event, index) => (
+                                <tr key={index}>
+                                    <td>{new Date(event.last_seen || event.timestamp).toLocaleTimeString()}</td>
+                                    <td className="mono primary">{event.device_ip}</td>
+                                    <td>{event.base_domain || event.domain}</td>
+                                    <td className="truncate max-w-xs">{event.page_title || event.title}</td>
+                                    <td>{event.search_query || '-'}</td>
+                                </tr>
+                            ))}
                         </tbody>
                     </table>
                 </div>

@@ -19,6 +19,7 @@ class WebEventRecord(BaseModel):
     request_bytes: int = 0
     response_bytes: int = 0
     snippet_redacted: Optional[str] = None
+    search_query: Optional[str] = None
     first_seen: Optional[str] = None
     last_seen: Optional[str] = None
 

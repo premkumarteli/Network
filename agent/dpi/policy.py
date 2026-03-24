@@ -6,8 +6,12 @@ from typing import Iterable, Optional
 from app.utils.domain_utils import get_base_domain, normalize_host
 
 
-DEFAULT_ALLOWED_PROCESSES = ["chrome.exe", "msedge.exe"]
+DEFAULT_ALLOWED_PROCESSES = ["chrome.exe", "msedge.exe", "firefox.exe", "python.exe"]
 DEFAULT_ALLOWED_DOMAINS = [
+    "google.com",
+    "bing.com",
+    "duckduckgo.com",
+    "yahoo.com",
     "youtube.com",
     "googlevideo.com",
     "youtubei.googleapis.com",
@@ -76,7 +80,18 @@ class InspectionPolicy:
         if not host:
             return False
         base_domain = get_base_domain(host) or host
-        return base_domain in self.allowed_domains
+        
+        # Exact match on base domain
+        if base_domain in self.allowed_domains:
+            return True
+            
+        # Suffix matching for regional variants (e.g. google.co.in match google.com)
+        # Simplified: if any allowed domain is in the host
+        for allowed in self.allowed_domains:
+            if allowed in host:
+                return True
+                
+        return False
 
     def to_payload(self) -> dict:
         return {

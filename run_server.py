@@ -23,6 +23,7 @@ def cleanup_runtime_on_process_exit():
         print(f"[!] Process-exit runtime cleanup failed: {exc}")
 
 def get_local_ip():
+    s = None
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # doesn't have to be reachable
@@ -31,8 +32,8 @@ def get_local_ip():
     except Exception:
         IP = '127.0.0.1'
     finally:
-        
-        s.close() # pyright: ignore[reportPossiblyUnboundVariable]
+        if s is not None:
+            s.close()
     return IP
 
 if __name__ == "__main__":

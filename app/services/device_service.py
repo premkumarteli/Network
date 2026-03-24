@@ -102,9 +102,51 @@ class DeviceService:
         managed = self._get_managed_devices(db_conn, organization_id)
         discovered_only = self._get_observed_devices(db_conn, organization_id)
 
-        devices = self._merge_devices(managed + discovered_only)
-        devices.sort(key=lambda d: d.get("last_seen") or "", reverse=True)
-        return devices
+        merged = self._merge_devices(managed + discovered_only)
+        self._add_activity_snapshots(db_conn, merged)
+        
+        merged.sort(key=lambda d: d.get("last_seen") or "", reverse=True)
+        return merged
+
+    def _add_activity_snapshots(self, db_conn, devices: List[dict]):
+        if not devices:
+            return
+        
+        cursor = db_conn.cursor(dictionary=True)
+        try:
+            device_ips = [d.get("ip") for d in devices if d.get("ip")]
+            if not device_ips:
+                return
+
+            # Batch query for latest session per device
+            format_strings = ','.join(['%s'] * len(device_ips))
+            query = f"""
+                SELECT s.device_ip, s.application, s.domain, s.last_seen
+                FROM sessions s
+                INNER JOIN (
+                    SELECT device_ip, MAX(last_seen) as max_seen
+                    FROM sessions
+                    WHERE device_ip IN ({format_strings})
+                    GROUP BY device_ip
+                ) m ON s.device_ip = m.device_ip AND s.last_seen = m.max_seen
+            """
+            cursor.execute(query, tuple(device_ips))
+            snapshots = {row["device_ip"]: row for row in cursor.fetchall()}
+            
+            for device in devices:
+                ip = device.get("ip")
+                snap = snapshots.get(ip)
+                if snap:
+                    device["top_application"] = snap["application"]
+                    device["top_domain"] = snap["domain"]
+                    device["activity_last_seen"] = self._format_timestamp(snap["last_seen"])
+                else:
+                    device["top_application"] = None
+                    device["top_domain"] = None
+        except Exception as e:
+            logger.error(f"Failed to fetch activity snapshots: {e}")
+        finally:
+            cursor.close()
 
     def _is_trackable_device_ip(self, ip: str | None) -> bool:
         return is_rfc1918_device_ip(ip)

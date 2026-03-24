@@ -126,6 +126,7 @@ class ProxyManager:
             if not line.startswith(EVENT_PREFIX):
                 continue
             payload = line[len(EVENT_PREFIX) :].strip()
+            logger.info("Captured raw event from mitmdump")
             try:
                 self.on_event(json.loads(payload))
             except (TypeError, ValueError):

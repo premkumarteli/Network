@@ -5,7 +5,13 @@ from typing import Optional
 
 
 class SessionService:
+    def __init__(self) -> None:
+        self._schema_ready = False
+
     def ensure_table(self, db_conn) -> None:
+        if self._schema_ready:
+            return
+
         cursor = db_conn.cursor()
         try:
             cursor.execute(

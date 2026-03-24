@@ -7,6 +7,7 @@ const Sidebar = ({ isCollapsed, toggleSidebar }) => {
     ? [
         { to: '/dashboard', icon: 'ri-dashboard-3-line', label: 'Dashboard' },
         { to: '/devices', icon: 'ri-macbook-line', label: 'Devices' },
+        { to: '/dpi', icon: 'ri-eye-line', label: 'DPI Dashboard' },
         { to: '/apps', icon: 'ri-apps-2-line', label: 'Applications' },
         { to: '/threats', icon: 'ri-shield-flash-line', label: 'Threats' },
         { to: '/logs', icon: 'ri-radar-line', label: 'Agent Monitoring' },

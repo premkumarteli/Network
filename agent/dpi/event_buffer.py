@@ -47,6 +47,7 @@ class EventBuffer:
     def enqueue(self, event: dict) -> None:
         try:
             self.queue.put_nowait(event)
+            logger.info("Enqueued raw event from proxy")
         except queue.Full:
             logger.warning("Dropping web inspection event because the queue is full.")
 
@@ -58,9 +59,15 @@ class EventBuffer:
             raw_event.get("base_domain")
         )
         process_name = str(raw_event.get("process_name") or "unknown").lower()
-        if not policy.inspection_enabled or not policy.allows_domain(domain):
+        process_name = str(raw_event.get("process_name") or "unknown").lower()
+        if not policy.inspection_enabled:
+            logger.debug("DPI event dropped: Inspection disabled")
+            return None
+        if not policy.allows_domain(domain):
+            logger.debug("DPI event dropped: Domain '%s' not allowed by policy", domain)
             return None
         if not policy.allows_process(process_name):
+            logger.debug("DPI event dropped: Process '%s' not allowed by policy", process_name)
             return None
 
         snippet = sanitize_text_snippet(raw_event.get("snippet_redacted"), max_bytes=policy.snippet_max_bytes)
@@ -100,6 +107,7 @@ class EventBuffer:
                     prepared = self._prepare_event(item)
                     if prepared:
                         batch.append(prepared)
+                        logger.info("Prepared DPI event for %s: %s", prepared.get("base_domain"), prepared.get("page_title"))
                     self.queue.task_done()
                 except queue.Empty:
                     pass
@@ -120,6 +128,7 @@ class EventBuffer:
                         timeout=10,
                     )
                     response.raise_for_status()
+                    logger.info("Successfully uploaded batch of %d DPI events", len(batch))
                     batch = []
                     last_send = time.time()
             except Exception as exc:

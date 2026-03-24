@@ -151,7 +151,7 @@ class DeviceDetector:
         )
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(0.5)
+        sock.settimeout(0.3)
 
         try:
             sock.sendto(netbios_query, (ip, 137))
@@ -187,7 +187,7 @@ class DeviceDetector:
             output = subprocess.check_output(
                 ["nbtstat", "-A", ip],
                 stderr=subprocess.STDOUT,
-                timeout=1.5,
+                timeout=0.5,
             ).decode(errors="ignore")
         except Exception:
             return None
@@ -201,7 +201,7 @@ class DeviceDetector:
     def get_ping_name(self, ip):
         system_name = platform.system().lower()
         if system_name == "windows":
-            command = ["ping", "-a", "-n", "1", "-w", "750", ip]
+            command = ["ping", "-a", "-n", "1", "-w", "500", ip]
         else:
             command = ["ping", "-c", "1", "-W", "1", ip]
 
@@ -209,7 +209,7 @@ class DeviceDetector:
             output = subprocess.check_output(
                 command,
                 stderr=subprocess.STDOUT,
-                timeout=2,
+                timeout=0.6,
             ).decode(errors="ignore")
         except Exception:
             return None
@@ -249,11 +249,11 @@ class DeviceDetector:
         return None
 
     def get_roku_name(self, ip):
-        xml_text = self._http_get_text(f"http://{ip}:8060/query/device-info", timeout=1.0)
+        xml_text = self._http_get_text(f"http://{ip}:8060/query/device-info", timeout=0.5)
         return self._extract_xml_name(xml_text, ip)
 
     def get_chromecast_name(self, ip):
-        payload = self._http_get_text(f"http://{ip}:8008/setup/eureka_info?options=detail", timeout=1.0)
+        payload = self._http_get_text(f"http://{ip}:8008/setup/eureka_info?options=detail", timeout=0.5)
         if not payload:
             return None
         try:
@@ -330,7 +330,7 @@ class DeviceDetector:
     def get_upnp_name(self, ip):
         locations = self._discover_upnp_locations().get(ip, [])
         for location in locations[:3]:
-            xml_text = self._http_get_text(location, timeout=1.2)
+            xml_text = self._http_get_text(location, timeout=0.5)
             name = self._extract_xml_name(xml_text, ip)
             if name:
                 return name

@@ -21,6 +21,9 @@ logger = logging.getLogger("netvisor.services.flow")
 flow_queue = asyncio.Queue(maxsize=10000)
 
 class FlowService:
+    def __init__(self) -> None:
+        self._schema_ready = False
+
     def _column_exists(self, cursor, table_name: str, column_name: str) -> bool:
         cursor.execute(
             """
@@ -264,25 +267,45 @@ class FlowService:
                     break
             
             if batch:
-                await self._persist_batch(batch)
+                # Offload DB-heavy work to a thread to avoid blocking the event loop
+                events_to_emit = await asyncio.to_thread(self._sync_persist_batch, batch)
+                
+                # Emit events in the main event loop
+                for event_name, payload in events_to_emit:
+                    await emit_event(event_name, payload)
+
                 for _ in range(len(batch)):
                     flow_queue.task_done()
 
     async def _persist_batch(self, batch):
+        """No longer used directly, superseded by _sync_persist_batch + to_thread."""
+        events_to_emit = await asyncio.to_thread(self._sync_persist_batch, batch)
+        for event_name, payload in events_to_emit:
+            await emit_event(event_name, payload)
+
+    def _sync_persist_batch(self, batch) -> list[tuple[str, dict]]:
+        """Synchronous version of persist_batch to be run in a thread."""
+        events_to_emit = []
         conn = get_db_connection()
-        if not conn: return
+        if not conn: return []
         cursor = None
         try:
-            managed_device_service.ensure_table(conn)
-            self._ensure_runtime_tables(conn)
-            self._ensure_flow_log_schema(conn)
-            application_service.ensure_schema(conn)
-            system_service.ensure_tables(conn)
-            external_endpoint_service.ensure_table(conn)
-            session_service.ensure_table(conn)
+            if not self._schema_ready:
+                managed_device_service.ensure_table(conn)
+                self._ensure_runtime_tables(conn)
+                self._ensure_flow_log_schema(conn)
+                application_service.ensure_schema(conn)
+                system_service.ensure_tables(conn)
+                external_endpoint_service.ensure_table(conn)
+                session_service.ensure_table(conn)
+                self._schema_ready = True
+            
             if not system_service.is_monitoring_enabled(conn):
-                logger.info("Monitoring disabled, dropping %s buffered flow(s)", len(batch))
-                return
+                # Using print for logging in a separate thread if logger is not thread-safe, 
+                # but standard python logging is generally thread-safe.
+                logger.debug(f"Monitoring disabled, dropping {len(batch)} buffered flow(s)")
+                return []
+
             cursor = conn.cursor(dictionary=True)
             managed_ip_cache = {}
             organization_cache = {}
@@ -427,7 +450,7 @@ class FlowService:
                         json.dumps(breakdown),
                     ))
 
-                await emit_event(
+                events_to_emit.append((
                     "packet_event",
                     {
                         "time_str": str(self._mysql_timestamp(sanitized.last_seen) or ""),
@@ -442,13 +465,15 @@ class FlowService:
                         "management_mode": management_mode,
                         "network_scope": sanitized.network_scope,
                     },
-                )
+                ))
 
             conn.commit()
+            return events_to_emit
         except Exception as e:
             logger.error(f"Flow Persistence Error: {e}")
             if conn:
                 conn.rollback()
+            return []
         finally:
             if cursor:
                 cursor.close()

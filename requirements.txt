@@ -1,5 +1,4 @@
 # Existing dependencies
-flask
 requests
 scapy
 colorama

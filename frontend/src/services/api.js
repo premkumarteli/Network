@@ -172,7 +172,9 @@ export const systemService = {
   getGlobalWebActivity: (limit = 15) =>
     api.get("/web/activity", { params: { limit } }),
   getAppsSummary: () => api.get("/apps/summary"),
+  getDpiGlobalStatus: () => api.get("/dpi/status"),
   getAppDevices: (appName) => api.get(`/apps/${encodeURIComponent(appName)}/devices`),
+  getAppDpiEvents: (appName) => api.get(`/dpi/apps/${encodeURIComponent(appName)}`),
   getDeviceWebActivity: (deviceIp) => api.get(`/web/devices/${encodeURIComponent(deviceIp)}/activity`),
   getDeviceInspectionStatus: (deviceIp) => api.get(`/web/devices/${encodeURIComponent(deviceIp)}/status`),
   updateInspectionPolicy: (agentId, payload) =>

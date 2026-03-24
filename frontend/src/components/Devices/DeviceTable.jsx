@@ -34,6 +34,7 @@ const DeviceTable = ({ devices, onDeviceSelect }) => {
             <th>Device</th>
             <th>Mode</th>
             <th>Network</th>
+            <th>Top Activity</th>
             <th>Risk Level</th>
             <th>Last Seen</th>
             <th>Status</th>
@@ -74,6 +75,10 @@ const DeviceTable = ({ devices, onDeviceSelect }) => {
                 <td>
                   <div className="mono primary">{device.ip}</div>
                   <div className="mono muted">{device.mac || device.mac_address || "-"}</div>
+                </td>
+                <td>
+                  <div className="table-primary">{device.top_application || 'Idle'}</div>
+                  <div className="table-meta">{device.top_domain || '-'}</div>
                 </td>
                 <td>
                   <span className={`badge ${getRiskTone(device.risk_level)}`}>

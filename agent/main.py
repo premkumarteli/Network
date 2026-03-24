@@ -21,9 +21,13 @@ import logging
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.device_detector import DeviceDetector
-from agent.dpi import WebInspectionController
 from agent.flow_manager import FlowManager, FlowSummary
 from agent.traffic_metadata import DomainHintCache, extract_flow_hints
+try:
+    from agent.dpi import WebInspectionController
+except ImportError as e:
+    logging.warning(f"DPI module failed to import: {e}. Running in degraded mode without DPI.")
+    WebInspectionController = None
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -168,22 +172,25 @@ class NetworkAgent:
         threading.Thread(target=self._discovery_engine, daemon=True).start()
         
         self._register_agent()
-        self.web_inspection = WebInspectionController(
-            runtime_dir=AGENT_RUNTIME_DIR / "mitm",
-            agent_id=self.agent_id,
-            device_ip=self.local_ip,
-            organization_id=self.organization_id,
-            headers=self.headers,
-            policy_url=self.web_policy_url,
-            upload_url=self.web_events_url,
-            proxy_port=self.web_proxy_port,
-            policy_refresh_seconds=self.web_policy_refresh_seconds,
-        )
-        self.web_inspection.start()
-        logger.info(
-            "Web inspection launchers ready: %s",
-            ", ".join(sorted((self.web_inspection.status_snapshot().get("launcher_paths") or {}).values())),
-        )
+        if WebInspectionController is not None:
+            self.web_inspection = WebInspectionController(
+                runtime_dir=AGENT_RUNTIME_DIR / "mitm",
+                agent_id=self.agent_id,
+                device_ip=self.local_ip,
+                organization_id=self.organization_id,
+                headers=self.headers,
+                policy_url=self.web_policy_url,
+                upload_url=self.web_events_url,
+                proxy_port=self.web_proxy_port,
+                policy_refresh_seconds=self.web_policy_refresh_seconds,
+            )
+            self.web_inspection.start()
+            logger.info(
+                "Web inspection launchers ready: %s",
+                ", ".join(sorted((self.web_inspection.status_snapshot().get("launcher_paths") or {}).values())),
+            )
+        else:
+            logger.warning("Web inspection is disabled because WebInspectionController could not be imported.")
 
     def _init_agent_id(self):
         AGENT_RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -421,10 +428,22 @@ class NetworkAgent:
                         continue
                     candidates.append((ip, mac))
 
-                resolved_payloads = []
-                for payload, confidence in self.discovery_pool.map(self._resolve_discovered_device, candidates):
-                    resolved_payloads.append(payload)
-                    self.device_inventory.update(
+                import concurrent.futures
+
+
+                futures = {self.discovery_pool.submit(self._resolve_discovered_device, c): c for c in candidates}
+
+
+                for future in concurrent.futures.as_completed(futures):
+
+
+                    try:
+
+
+                        payload, confidence = future.result()
+
+
+                        self.device_inventory.update(
                         payload["ip"],
                         mac=payload["mac"],
                         hostname=payload["hostname"],
@@ -434,7 +453,14 @@ class NetworkAgent:
                         confidence=confidence,
                     )
 
-                self._sync_discovered_devices(resolved_payloads)
+
+                        self._sync_discovered_devices([payload])
+
+
+                    except Exception as exc:
+
+
+                        logger.warning("Failed to resolve device: %s", exc)
             except Exception as exc:
                 logger.warning("Discovery cycle failed: %s", exc)
             time.sleep(60)
@@ -457,4 +483,10 @@ class NetworkAgent:
         sniff(prn=self.process_packet, store=False, promisc=True, timeout=timeout)
 
 if __name__ == "__main__":
-    NetworkAgent(DEFAULT_CONFIG_PATH).start(timeout=60)
+    agent = NetworkAgent(DEFAULT_CONFIG_PATH)
+    try:
+        agent.start(timeout=60)
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}[*] Shutting down Netvisor Agent...{Style.RESET_ALL}")
+    finally:
+        agent.stop()

@@ -5,6 +5,7 @@ from ..services.agent_service import agent_service
 from ..services.device_service import device_service
 from ..services.managed_device_service import managed_device_service
 from ..services.web_inspection_service import web_inspection_service
+from .dpi import dpi_event_emitter
 import logging
 
 logger = logging.getLogger("netvisor.api.agents")
@@ -172,6 +173,10 @@ async def receive_web_events(
     conn = get_db_connection()
     try:
         count = web_inspection_service.store_events(conn, events)
+        # Emit each event to WebSocket (deduplicated, async)
+        loop = asyncio.get_event_loop()
+        for event in events:
+            loop.create_task(dpi_event_emitter.emit(event))
         return {"status": "success", "count": count}
     except Exception as exc:
         logger.error("Failed to store web inspection events: %s", exc, exc_info=True)
@@ -188,6 +193,7 @@ async def receive_devices(devices: list = Body(...), authorized: bool = Depends(
 
     conn = get_db_connection()
     try:
+        from ..main import p_sio
         count = 0
         for dev in devices:
             logger.debug("Upserting device: %s for org %s", dev.get("ip"), dev.get("organization_id"))
@@ -205,6 +211,7 @@ async def receive_devices(devices: list = Body(...), authorized: bool = Depends(
                 create_if_missing=True,
             ):
                 count += 1
+            await p_sio.emit("device_event", {"data": dev})
 
         conn.commit()
         logger.info("Upserted %s device(s) from agent scan.", count)

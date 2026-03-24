@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 # Placeholder routers - these will be populated as we migrate modules
-from . import health, auth, devices, flows, alerts, agents, gateway, dashboard, system, apps, agent_monitoring, web_inspection
+from . import health, auth, devices, flows, alerts, agents, gateway, dashboard, system, apps, agent_monitoring, web_inspection, dpi
 
 api_router = APIRouter()
 
@@ -17,3 +17,4 @@ api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboar
 api_router.include_router(system.router, prefix="/system", tags=["system"])
 api_router.include_router(apps.router, prefix="/apps", tags=["apps"])
 api_router.include_router(web_inspection.router, prefix="/web", tags=["web-inspection"])
+api_router.include_router(dpi.router, prefix="/dpi", tags=["dpi"])
