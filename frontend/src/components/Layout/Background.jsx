@@ -96,17 +96,6 @@ const Background = () => {
       for (let i = 0; i < asteroids.length; i++) {
         asteroids[i].update();
         asteroids[i].draw();
-        for (let j = i + 1; j < asteroids.length; j++) {
-          const dx = asteroids[i].x - asteroids[j].x;
-          const dy = asteroids[i].y - asteroids[j].y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < 200) {
-            ctx.beginPath();
-            ctx.moveTo(asteroids[i].x, asteroids[i].y);
-            ctx.lineTo(asteroids[j].x, asteroids[j].y);
-            ctx.stroke();
-          }
-        }
       }
       animationFrameId = requestAnimationFrame(animate);
     };
