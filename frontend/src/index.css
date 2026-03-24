@@ -121,25 +121,48 @@ body {
   pointer-events: none;
 }
 
-.ambient-background__dots {
-  position: absolute;
-  inset: 0;
-  perspective: 1000px;
+/* --- Technical Overlay (Scanlines) --- */
+body::before {
+  content: " ";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+              linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.04));
+  z-index: 9999;
+  background-size: 100% 4px, 3px 100%;
+  pointer-events: none;
+  opacity: 0.12;
 }
 
-.ambient-background__dot {
-  position: absolute;
-  width: var(--size, 6px);
-  height: var(--size, 6px);
-  background: var(--primary);
-  border-radius: 50%;
-  opacity: var(--opacity, 0.8);
-  filter: blur(0.5px) drop-shadow(0 0 10px var(--primary));
-  animation: drop var(--duration) linear infinite;
-  animation-delay: var(--delay, 0s);
-  left: var(--left);
-  top: -30px;
-  will-change: transform, opacity;
+/* Cyber Flicker Animation */
+@keyframes flicker {
+  0% { opacity: 0.97; }
+  5% { opacity: 0.88; }
+  10% { opacity: 0.95; }
+  15% { opacity: 0.81; }
+  20% { opacity: 0.94; }
+  25% { opacity: 0.88; }
+  30% { opacity: 0.82; }
+  35% { opacity: 0.99; }
+  45% { opacity: 0.92; }
+}
+
+.flicker-slow {
+  animation: flicker 12s infinite;
+}
+
+/* Terminal Cursor */
+.terminal-cursor::after {
+  content: "_";
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
 }
 
 .glass-panel {
@@ -156,22 +179,6 @@ body {
   border-color: rgba(6, 182, 212, 0.2);
 }
 
-@keyframes drop {
-  0% {
-    transform: translateY(0);
-    opacity: 0;
-  }
-  10% {
-    opacity: 0.6;
-  }
-  90% {
-    opacity: 0.6;
-  }
-  100% {
-    transform: translateY(100vh);
-    opacity: 0;
-  }
-}
 
 .ambient-background__glow--cyan {
   top: -10rem;
