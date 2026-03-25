@@ -108,17 +108,35 @@ class DomainHintCache:
         if dns_layer.qr != 1:
             return question_name
 
-        answer = dns_layer.an
         answer_count = int(getattr(dns_layer, "ancount", 0) or 0)
-        for _ in range(answer_count):
+
+        # Scapy returns a list of DNSRR for an
+        if isinstance(dns_layer.an, list):
+            answers = dns_layer.an
+        elif hasattr(dns_layer.an, "__iter__"):
+            answers = dns_layer.an
+        else:
+            answers = []
+            current_answer = dns_layer.an
+            while current_answer and isinstance(current_answer, DNSRR):
+                answers.append(current_answer)
+                if hasattr(current_answer, "payload"):
+                    current_answer = current_answer.payload
+                else:
+                    break
+
+        for answer in answers:
             if not isinstance(answer, DNSRR):
-                break
+                continue
             answer_domain = _normalize_domain(
                 answer.rrname.decode(errors="ignore") if hasattr(answer.rrname, "decode") else str(answer.rrname)
             ) or question_name
             if answer.type in (1, 28):
-                self.remember(str(answer.rdata), answer_domain)
-            answer = answer.payload
+                if isinstance(answer.rdata, bytes):
+                    rdata_str = answer.rdata.decode('utf-8', errors='ignore')
+                else:
+                    rdata_str = str(answer.rdata)
+                self.remember(rdata_str, answer_domain)
 
         return question_name
 
@@ -197,12 +215,16 @@ def extract_flow_hints(packet, domain_cache: DomainHintCache | None = None) -> d
     - sni: TLS Server Name Indication when present
     """
     if packet.haslayer(DNS) and packet.haslayer(DNSQR):
-        domain = (
-            domain_cache.observe_dns(packet)
-            if domain_cache
-            else _normalize_domain(packet[DNSQR].qname.decode(errors="ignore"))
-        )
+        if domain_cache:
+            domain = domain_cache.observe_dns(packet)
+        else:
+            domain = _normalize_domain(packet[DNSQR].qname.decode(errors="ignore"))
         return {"domain": domain, "sni": None}
+
+    if packet.haslayer(DNS):
+        if domain_cache:
+            domain_cache.observe_dns(packet)
+        return {"domain": None, "sni": None}
 
     if packet.haslayer(TCP) and packet.haslayer(Raw):
         tls_domain = _extract_tls_sni(bytes(packet[Raw].load))

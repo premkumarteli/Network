@@ -80,12 +80,6 @@ class ApplicationService:
             if base_domain in allowed_domains:
                 return application
         
-        # Instead of grouping everything unknown as "Other", use the base domain name.
-        # Example: reddit.com -> Reddit
-        name = base_domain.split('.')[0]
-        if name:
-            return name.title()
-            
         return "Other"
 
     def classify_by_asn(self, ip_value: str | None) -> Optional[str]:
