@@ -3,6 +3,9 @@ from __future__ import annotations
 from typing import Optional, Set
 import logging
 
+from ..core.config import settings
+from ..db.session import require_runtime_schema
+
 logger = logging.getLogger("netvisor.managed_devices")
 
 
@@ -10,30 +13,49 @@ class ManagedDeviceService:
     def __init__(self) -> None:
         self._schema_ready = False
 
+    def _column_exists(self, cursor, table_name: str, column_name: str) -> bool:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s AND column_name = %s
+            LIMIT 1
+            """,
+            (settings.DB_NAME, table_name, column_name),
+        )
+        return cursor.fetchone() is not None
+
+    def _index_exists(self, cursor, table_name: str, index_name: str) -> bool:
+        cursor.execute(
+            """
+            SELECT 1
+            FROM information_schema.statistics
+            WHERE table_schema = %s AND table_name = %s AND index_name = %s
+            LIMIT 1
+            """,
+            (settings.DB_NAME, table_name, index_name),
+        )
+        return cursor.fetchone() is not None
+
+    def _primary_key_columns(self, cursor, table_name: str) -> list[str]:
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.key_column_usage
+            WHERE table_schema = %s
+              AND table_name = %s
+              AND constraint_name = 'PRIMARY'
+            ORDER BY ordinal_position
+            """,
+            (settings.DB_NAME, table_name),
+        )
+        return [row[0] for row in cursor.fetchall() if row and row[0]]
+
     def ensure_table(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        cursor = db_conn.cursor()
-        try:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS managed_devices (
-                    agent_id VARCHAR(100) PRIMARY KEY,
-                    organization_id CHAR(36),
-                    device_ip VARCHAR(50) NOT NULL,
-                    device_mac VARCHAR(50) DEFAULT '-',
-                    hostname VARCHAR(100) DEFAULT 'Unknown',
-                    os_family VARCHAR(50) DEFAULT 'Unknown',
-                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY uq_managed_ip_org (device_ip, organization_id)
-                )
-                """
-            )
-            db_conn.commit()
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def upsert_device(
         self,
@@ -61,6 +83,7 @@ class ManagedDeviceService:
                 )
                 VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE
+                    agent_id = VALUES(agent_id),
                     organization_id = VALUES(organization_id),
                     device_ip = VALUES(device_ip),
                     device_mac = VALUES(device_mac),

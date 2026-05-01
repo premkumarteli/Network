@@ -1,32 +1,22 @@
 import axios from "axios";
+import { getApiBaseUrl } from "../config/runtime";
 
-// Fast API backend runs on port 8000 by default and base path is /api/v1
-// Use window.location.hostname so it works from any networked device
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || `http://${window.location.hostname}:8000/api/v1`;
+const API_BASE_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
+  xsrfCookieName: "XSRF-TOKEN",
+  xsrfHeaderName: "X-XSRF-TOKEN",
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Add a request interceptor to attach the JWT token
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("access_token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
-
-// Add a response interceptor to handle 401/403 (auto-logout)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-      localStorage.removeItem("access_token");
       if (window.location.pathname !== "/login") {
         window.location.href = "/login";
       }
@@ -34,17 +24,6 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-// Helper: decode JWT payload (base64url)
-function decodeToken(token) {
-  try {
-    const payload = token.split(".")[1];
-    const decoded = atob(payload.replace(/-/g, "+").replace(/_/g, "/"));
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
 
 function parseTimestamp(value) {
   if (!value) {
@@ -123,42 +102,8 @@ export const authService = {
     });
   },
   register: (data) => api.post("/auth/register", data),
-  logout: () => {
-    localStorage.removeItem("access_token");
-    return Promise.resolve();
-  },
-  getCurrentUser: async () => {
-    const token = localStorage.getItem("access_token");
-    if (!token) {
-      return Promise.reject(new Error("No token"));
-    }
-    try {
-      return await api.get("/auth/me");
-    } catch (error) {
-      if (error.response) {
-        throw error;
-      }
-
-      const payload = decodeToken(token);
-      if (!payload) {
-        localStorage.removeItem("access_token");
-        return Promise.reject(new Error("Invalid token"));
-      }
-      if (payload.exp && payload.exp * 1000 < Date.now()) {
-        localStorage.removeItem("access_token");
-        return Promise.reject(new Error("Token expired"));
-      }
-      return Promise.resolve({
-        data: {
-          authenticated: true,
-          id: payload.sub,
-          username: payload.username || "User",
-          role: payload.role || "viewer",
-          organization_id: payload.organization_id,
-        },
-      });
-    }
-  },
+  logout: () => api.post("/auth/logout").catch(() => null),
+  getCurrentUser: () => api.get("/auth/me"),
 };
 
 export const systemService = {
@@ -169,27 +114,46 @@ export const systemService = {
   getStats: () => api.get("/dashboard/overview"),
   getActivity: (limit = 50) =>
     api.get("/dashboard/activity", { params: { limit } }),
+  getTrafficHistory: (hours = 24) =>
+    api.get("/dashboard/traffic-history", { params: { hours } }),
+  getDeviceStats: (limit = 5) =>
+    api.get("/dashboard/device-stats", { params: { limit } }),
   getGlobalWebActivity: (limit = 15) =>
     api.get("/web/activity", { params: { limit } }),
+  getGlobalWebEvidenceGroups: (limit = 15) =>
+    api.get("/web/activity/groups", { params: { limit } }),
   getAppsSummary: () => api.get("/apps/summary"),
   getDpiGlobalStatus: () => api.get("/dpi/status"),
   getAppDevices: (appName) => api.get(`/apps/${encodeURIComponent(appName)}/devices`),
   getAppDpiEvents: (appName) => api.get(`/dpi/apps/${encodeURIComponent(appName)}`),
+  getAnalyticsOverview: (hours = 24, limit = 8) =>
+    api.get("/analytics/overview", { params: { hours, limit } }),
+  exportAnalyticsReport: (kind, params = {}, format = "csv") =>
+    api.get("/analytics/export", {
+      params: { kind, format, ...params },
+      responseType: "blob",
+    }),
+  getFlowLogs: (params = {}) => api.get("/logs/flows", { params }),
+  getFlowStats: () => api.get("/logs/stats"),
   getDeviceWebActivity: (deviceIp) => api.get(`/web/devices/${encodeURIComponent(deviceIp)}/activity`),
+  getDeviceWebEvidenceGroups: (deviceIp) =>
+    api.get(`/web/devices/${encodeURIComponent(deviceIp)}/activity/groups`),
   getDeviceInspectionStatus: (deviceIp) => api.get(`/web/devices/${encodeURIComponent(deviceIp)}/status`),
   updateInspectionPolicy: (agentId, payload) =>
     api.post(`/web/policies/${encodeURIComponent(agentId)}`, payload),
   getDeviceProfile: async (deviceIp) => {
-    const [devicesRes, activityRes, webActivityRes, inspectionStatusRes] = await Promise.allSettled([
+    const [devicesRes, activityRes, webActivityRes, webEvidenceGroupsRes, inspectionStatusRes] = await Promise.allSettled([
       api.get("/devices/"),
       api.get("/dashboard/activity", { params: { limit: 250 } }),
       api.get(`/web/devices/${encodeURIComponent(deviceIp)}/activity`),
+      api.get(`/web/devices/${encodeURIComponent(deviceIp)}/activity/groups`),
       api.get(`/web/devices/${encodeURIComponent(deviceIp)}/status`),
     ]);
 
     const devicesData = devicesRes.status === 'fulfilled' ? devicesRes.value.data || [] : [];
     const activityData = activityRes.status === 'fulfilled' ? activityRes.value.data || [] : [];
     const webActivityData = webActivityRes.status === 'fulfilled' ? webActivityRes.value.data?.activity || [] : [];
+    const webEvidenceGroupsData = webEvidenceGroupsRes.status === 'fulfilled' ? webEvidenceGroupsRes.value.data?.activity || [] : [];
     const inspectionStatusData = inspectionStatusRes.status === 'fulfilled' ? inspectionStatusRes.value.data || null : null;
 
     const device = devicesData.find((entry) => entry.ip === deviceIp) || null;
@@ -251,6 +215,22 @@ export const systemService = {
       ...entry,
       request_bytes_formatted: formatByteValue(entry.request_bytes),
       response_bytes_formatted: formatByteValue(entry.response_bytes),
+      event_count: Number(entry.event_count) || 1,
+      confidence_score: Number(entry.confidence_score) || 0,
+      risk_level: entry.risk_level || 'safe',
+    }));
+
+    const webEvidenceGroups = webEvidenceGroupsData.map((entry) => ({
+      ...entry,
+      request_bytes_formatted: formatByteValue(entry.request_bytes),
+      response_bytes_formatted: formatByteValue(entry.response_bytes),
+      event_count: Number(entry.event_count) || 1,
+      confidence_score: Number(entry.confidence_score) || 0,
+      risk_level: entry.risk_level || 'safe',
+      page_urls: Array.isArray(entry.page_urls) ? entry.page_urls : [],
+      page_titles: Array.isArray(entry.page_titles) ? entry.page_titles : [],
+      content_ids: Array.isArray(entry.content_ids) ? entry.content_ids : [],
+      search_queries: Array.isArray(entry.search_queries) ? entry.search_queries : [],
     }));
 
     return {
@@ -269,6 +249,7 @@ export const systemService = {
         applications,
         recent_events: sortedEvents.slice(0, 8),
         web_activity: webActivity,
+        web_evidence_groups: webEvidenceGroups,
         inspection_status: inspectionStatusData,
         device,
       },
@@ -332,7 +313,7 @@ export const systemService = {
 };
 
 export const agentService = {
-  getAgents: () => api.get("/agents"),
+  getAgents: () => api.get("/agents/"),
   getAgentDetails: (agentId) => api.get(`/agents/${encodeURIComponent(agentId)}`),
 };
 

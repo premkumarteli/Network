@@ -25,3 +25,5 @@ class User(UserBase):
 class GenericResponse(BaseModel):
     status: str
     message: str
+
+    model_config = ConfigDict(extra="allow")

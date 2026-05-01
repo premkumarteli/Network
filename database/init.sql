@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     email VARCHAR(100) UNIQUE,
     role VARCHAR(20) DEFAULT 'viewer',
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    failed_login_count INT NOT NULL DEFAULT 0,
+    locked_until DATETIME NULL,
+    last_password_change DATETIME DEFAULT CURRENT_TIMESTAMP,
     organization_id CHAR(36),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
@@ -37,13 +41,41 @@ CREATE TABLE IF NOT EXISTS agents (
     inspection_ca_installed BOOLEAN DEFAULT FALSE,
     inspection_browsers_json TEXT,
     inspection_last_error TEXT,
+    inspection_metrics_json TEXT,
     last_seen DATETIME,
+    cpu_usage FLOAT DEFAULT 0.0,
+    ram_usage FLOAT DEFAULT 0.0,
     INDEX idx_agents_org_last_seen (organization_id, last_seen),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_credentials (
+    agent_id VARCHAR(100) NOT NULL,
+    key_version INT NOT NULL,
+    secret_salt VARCHAR(64) NOT NULL,
+    secret_hash CHAR(64) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    issued_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    rotated_at DATETIME NULL,
+    last_used_at DATETIME NULL,
+    PRIMARY KEY (agent_id, key_version),
+    INDEX idx_agent_credentials_status (status)
+);
+
+CREATE TABLE IF NOT EXISTS agent_request_nonces (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    agent_id VARCHAR(100) NOT NULL,
+    key_version INT NOT NULL,
+    nonce VARCHAR(64) NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL,
+    UNIQUE KEY uq_agent_nonce (agent_id, key_version, nonce),
+    INDEX idx_agent_nonce_expires_at (expires_at)
+);
+
 CREATE TABLE IF NOT EXISTS managed_devices (
-    agent_id VARCHAR(100) PRIMARY KEY,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    agent_id VARCHAR(100) NOT NULL,
     organization_id CHAR(36),
     device_ip VARCHAR(50) NOT NULL,
     device_mac VARCHAR(50) DEFAULT '-',
@@ -51,15 +83,51 @@ CREATE TABLE IF NOT EXISTS managed_devices (
     os_family VARCHAR(50) DEFAULT 'Unknown',
     first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_managed_agent_ip_org (agent_id, device_ip, organization_id),
     UNIQUE KEY uq_managed_ip_org (device_ip, organization_id),
+    INDEX idx_managed_agent_last_seen (agent_id, last_seen),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS gateways (
     gateway_id VARCHAR(100) PRIMARY KEY,
+    organization_id CHAR(36) NULL,
     hostname VARCHAR(100) DEFAULT 'Unknown',
     capture_mode VARCHAR(50) DEFAULT 'promiscuous',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS flow_ingest_batches (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_type VARCHAR(16) NOT NULL,
+    source_id VARCHAR(100),
+    organization_id CHAR(36),
+    batch_id CHAR(64) NOT NULL,
+    batch_json LONGTEXT NOT NULL,
+    flow_count INT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempt_count INT NOT NULL DEFAULT 0,
+    available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    claimed_by VARCHAR(100),
+    claimed_at DATETIME NULL,
+    processed_at DATETIME NULL,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_flow_ingest_batch_id (batch_id),
+    INDEX idx_flow_ingest_status_available (status, available_at, id),
+    INDEX idx_flow_ingest_created_at (created_at),
+    INDEX idx_flow_ingest_source (source_type, source_id, created_at),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS worker_heartbeats (
+    worker_id VARCHAR(100) PRIMARY KEY,
+    worker_type VARCHAR(32) NOT NULL,
+    last_seen DATETIME NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_worker_heartbeats_type_seen (worker_type, last_seen)
 );
 
 CREATE TABLE IF NOT EXISTS flow_logs (
@@ -129,6 +197,7 @@ CREATE TABLE IF NOT EXISTS devices (
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_mac_org (mac, organization_id),
     INDEX idx_devices_ip (ip),
+    INDEX idx_devices_org_last_seen (organization_id, last_seen),
     INDEX idx_devices_agent_org_last_seen (agent_id, organization_id, last_seen),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
@@ -206,6 +275,7 @@ CREATE TABLE IF NOT EXISTS web_events (
     page_title VARCHAR(255) DEFAULT 'Untitled',
     content_category VARCHAR(100) DEFAULT 'web',
     content_id VARCHAR(255),
+    search_query VARCHAR(255),
     http_method VARCHAR(16) DEFAULT 'GET',
     status_code INT,
     content_type VARCHAR(120),
@@ -213,8 +283,12 @@ CREATE TABLE IF NOT EXISTS web_events (
     response_bytes INT DEFAULT 0,
     snippet_redacted TEXT,
     snippet_hash VARCHAR(64),
+    confidence_score FLOAT DEFAULT 0.0,
+    event_count INT DEFAULT 1,
     first_seen DATETIME,
     last_seen DATETIME,
+    risk_level VARCHAR(20) DEFAULT 'safe',
+    threat_msg VARCHAR(255),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_web_events_device_last_seen (device_ip, last_seen),
     INDEX idx_web_events_agent_last_seen (agent_id, last_seen),

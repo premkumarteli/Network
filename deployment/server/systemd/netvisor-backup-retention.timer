@@ -1,0 +1,10 @@
+[Unit]
+Description=Run NetVisor Backup Retention Daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=netvisor-backup-retention.service
+
+[Install]
+WantedBy=timers.target

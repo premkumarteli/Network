@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ..db.session import require_runtime_schema
 from ..utils.network import classify_ip_scope, normalize_ip
 
 
@@ -12,27 +13,8 @@ class ExternalEndpointService:
     def ensure_table(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        cursor = db_conn.cursor()
-        try:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS external_endpoints (
-                    endpoint_ip VARCHAR(50) PRIMARY KEY,
-                    organization_id CHAR(36),
-                    last_domain VARCHAR(255) DEFAULT NULL,
-                    last_application VARCHAR(50) DEFAULT NULL,
-                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    total_flows BIGINT DEFAULT 0,
-                    total_bytes BIGINT DEFAULT 0,
-                    INDEX idx_external_endpoints_org_last_seen (organization_id, last_seen)
-                )
-                """
-            )
-            db_conn.commit()
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def observe_endpoint(
         self,

@@ -1,7 +1,0 @@
-class VPNAnomalyDetector:
-    def __init__(self):
-        pass
-    
-    def predict(self, features):
-        # Placeholder for VPN anomaly detection logic
-        return 0.0

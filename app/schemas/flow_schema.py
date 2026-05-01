@@ -14,6 +14,11 @@ class FlowBase(BaseModel):
     sni: Optional[str] = None
     src_mac: Optional[str] = None
     dst_mac: Optional[str] = None
+    application_protocol: Optional[str] = None
+    service_name: Optional[str] = None
+    analysis_source: str = "transport_fallback"
+    analysis_confidence: float = 0.0
+    analysis_signals: tuple[str, ...] = ()
     packet_count: int
     byte_count: int
     duration: float

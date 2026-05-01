@@ -1,12 +1,18 @@
+import json
+import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+from datetime import timedelta
 import csv
+import shutil
 import socket
 
 import psutil
 
 from ..core.config import settings
+from ..db.session import require_runtime_schema
 
 
 class SystemService:
@@ -26,6 +32,12 @@ class SystemService:
 
     def __init__(self, backup_root: Optional[Path] = None):
         self.backup_root = Path(backup_root or settings.BACKUP_DIR)
+        self._status_cache_ttl_seconds = max(float(os.getenv("NETVISOR_HEALTH_CACHE_SECONDS", "10")), 0.0)
+        self._latest_backup_cache: dict | None = None
+        self._latest_backup_cache_ts = 0.0
+        self._backup_retention_cache: dict | None = None
+        self._backup_retention_cache_ts = 0.0
+        self._backup_retention_cache_days: int | None = None
         runtime_root = Path(__file__).resolve().parents[2] / "runtime"
         self._volatile_runtime_files = (
             runtime_root / "agent" / "device_inventory.json",
@@ -35,30 +47,9 @@ class SystemService:
     def ensure_tables(self, db_conn) -> None:
         if self._schema_ready:
             return
-
+        require_runtime_schema(db_conn)
         cursor = db_conn.cursor()
         try:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS system_settings (
-                    setting_key VARCHAR(100) PRIMARY KEY,
-                    setting_value VARCHAR(20) NOT NULL,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-                """
-            )
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS audit_logs (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    organization_id CHAR(36) NULL,
-                    username VARCHAR(100) NOT NULL,
-                    action VARCHAR(100) NOT NULL,
-                    details TEXT,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
             cursor.execute(
                 """
                 INSERT INTO system_settings (setting_key, setting_value)
@@ -74,6 +65,7 @@ class SystemService:
                 """
             )
             db_conn.commit()
+            self._schema_ready = True
         finally:
             cursor.close()
 
@@ -85,6 +77,13 @@ class SystemService:
         if hasattr(value, "strftime"):
             return value.strftime("%Y-%m-%d %H:%M:%S")
         return value
+
+    def _invalidate_backup_cache(self) -> None:
+        self._latest_backup_cache = None
+        self._latest_backup_cache_ts = 0.0
+        self._backup_retention_cache = None
+        self._backup_retention_cache_ts = 0.0
+        self._backup_retention_cache_days = None
 
     def _table_count(self, cursor, table_name: str) -> int:
         cursor.execute(f"SELECT COUNT(*) AS count FROM {table_name}")
@@ -126,12 +125,14 @@ class SystemService:
         finally:
             summary_cursor.close()
 
+        retention = self.cleanup_old_backups()
         if total_rows == 0:
             return {
                 "created": False,
                 "backup_dir": None,
                 "row_count": 0,
                 "tables": {},
+                "retention": retention,
             }
 
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -151,11 +152,219 @@ class SystemService:
             for table_name, row_count in exported_tables.items():
                 writer.writerow([table_name, row_count])
 
+        manifest_path = backup_dir / "manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "reason": reason,
+                    "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "table_counts": exported_tables,
+                    "row_count": sum(exported_tables.values()),
+                },
+                indent=2,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+
+        self._invalidate_backup_cache()
         return {
             "created": True,
             "backup_dir": str(backup_dir),
             "row_count": sum(exported_tables.values()),
             "tables": exported_tables,
+            "retention": retention,
+        }
+
+    def latest_backup_status(self) -> dict:
+        now = time.monotonic()
+        if self._latest_backup_cache is not None and (now - self._latest_backup_cache_ts) < self._status_cache_ttl_seconds:
+            return dict(self._latest_backup_cache)
+
+        if not self.backup_root.exists():
+            snapshot = {
+                "configured": False,
+                "verified": False,
+                "latest_backup_dir": None,
+                "summary_exists": False,
+                "manifest_exists": False,
+                "row_count": 0,
+                "tables": {},
+            }
+            self._latest_backup_cache = dict(snapshot)
+            self._latest_backup_cache_ts = now
+            return snapshot
+
+        candidates = [path for path in self.backup_root.iterdir() if path.is_dir()]
+        if not candidates:
+            snapshot = {
+                "configured": True,
+                "verified": False,
+                "latest_backup_dir": None,
+                "summary_exists": False,
+                "manifest_exists": False,
+                "row_count": 0,
+                "tables": {},
+            }
+            self._latest_backup_cache = dict(snapshot)
+            self._latest_backup_cache_ts = now
+            return snapshot
+
+        latest = max(candidates, key=lambda path: path.stat().st_mtime)
+        summary_path = latest / "summary.csv"
+        manifest_path = latest / "manifest.json"
+        verified = summary_path.exists() and manifest_path.exists()
+        row_count = 0
+        tables: dict[str, int] = {}
+
+        if summary_path.exists():
+            try:
+                with summary_path.open("r", encoding="utf-8", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    for row in reader:
+                        table_name = str(row.get("table_name") or "").strip()
+                        if not table_name:
+                            continue
+                        table_row_count = int(row.get("row_count") or 0)
+                        tables[table_name] = table_row_count
+                        row_count += table_row_count
+            except Exception:
+                verified = False
+
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                row_count = int(manifest.get("row_count") or row_count)
+                if isinstance(manifest.get("table_counts"), dict) and manifest["table_counts"]:
+                    tables = {str(key): int(value) for key, value in manifest["table_counts"].items()}
+            except Exception:
+                verified = False
+
+        snapshot = {
+            "configured": True,
+            "verified": verified,
+            "latest_backup_dir": str(latest),
+            "summary_exists": summary_path.exists(),
+            "manifest_exists": manifest_path.exists(),
+            "row_count": row_count,
+            "tables": tables,
+            "updated_at": datetime.fromtimestamp(latest.stat().st_mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        self._latest_backup_cache = dict(snapshot)
+        self._latest_backup_cache_ts = now
+        return snapshot
+
+    def backup_retention_status(self, retention_days: Optional[int] = None) -> dict:
+        retention_days = int(retention_days if retention_days is not None else settings.BACKUP_RETENTION_DAYS)
+        now = time.monotonic()
+        if (
+            self._backup_retention_cache is not None
+            and self._backup_retention_cache_days == retention_days
+            and (now - self._backup_retention_cache_ts) < self._status_cache_ttl_seconds
+        ):
+            return dict(self._backup_retention_cache)
+
+        if retention_days <= 0:
+            snapshot = {
+                "configured": False,
+                "retention_days": retention_days,
+                "cutoff_at": None,
+                "backup_count": 0,
+                "expired_backup_count": 0,
+            }
+            self._backup_retention_cache = dict(snapshot)
+            self._backup_retention_cache_ts = now
+            self._backup_retention_cache_days = retention_days
+            return snapshot
+
+        if not self.backup_root.exists():
+            snapshot = {
+                "configured": False,
+                "retention_days": retention_days,
+                "cutoff_at": None,
+                "backup_count": 0,
+                "expired_backup_count": 0,
+            }
+            self._backup_retention_cache = dict(snapshot)
+            self._backup_retention_cache_ts = now
+            self._backup_retention_cache_days = retention_days
+            return snapshot
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        candidates = [path for path in self.backup_root.iterdir() if path.is_dir()]
+        expired_backup_count = 0
+        for path in candidates:
+            updated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            if updated_at < cutoff:
+                expired_backup_count += 1
+
+        snapshot = {
+            "configured": True,
+            "retention_days": retention_days,
+            "cutoff_at": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "backup_count": len(candidates),
+            "expired_backup_count": expired_backup_count,
+        }
+        self._backup_retention_cache = dict(snapshot)
+        self._backup_retention_cache_ts = now
+        self._backup_retention_cache_days = retention_days
+        return snapshot
+
+    def cleanup_old_backups(
+        self,
+        retention_days: Optional[int] = None,
+        dry_run: bool = False,
+    ) -> dict:
+        retention_days = int(retention_days if retention_days is not None else settings.BACKUP_RETENTION_DAYS)
+        if retention_days <= 0:
+            return {
+                "configured": False,
+                "retention_days": retention_days,
+                "dry_run": dry_run,
+                "cutoff_at": None,
+                "deleted_count": 0,
+                "deleted_dirs": [],
+                "errors": [],
+            }
+
+        if not self.backup_root.exists():
+            return {
+                "configured": False,
+                "retention_days": retention_days,
+                "dry_run": dry_run,
+                "cutoff_at": None,
+                "deleted_count": 0,
+                "deleted_dirs": [],
+                "errors": [],
+            }
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        deleted_dirs: list[str] = []
+        errors: list[dict[str, str]] = []
+
+        candidates = [path for path in self.backup_root.iterdir() if path.is_dir()]
+        for path in sorted(candidates, key=lambda candidate: candidate.stat().st_mtime):
+            updated_at = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+            if updated_at >= cutoff:
+                continue
+            if dry_run:
+                deleted_dirs.append(str(path))
+                continue
+            try:
+                shutil.rmtree(path)
+                deleted_dirs.append(str(path))
+            except OSError as exc:
+                errors.append({"backup_dir": str(path), "error": str(exc)})
+
+        self._invalidate_backup_cache()
+        return {
+            "configured": True,
+            "retention_days": retention_days,
+            "dry_run": dry_run,
+            "cutoff_at": cutoff.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "deleted_count": len(deleted_dirs),
+            "deleted_dirs": deleted_dirs,
+            "errors": errors,
         }
 
     def clear_runtime_data(self, db_conn) -> dict:
@@ -193,6 +402,7 @@ class SystemService:
     def backup_and_reset_runtime_data(self, db_conn, reason: str = "manual") -> dict:
         backup = self.backup_runtime_data(db_conn, reason=reason)
         cleared = self.clear_runtime_data(db_conn)
+        self._invalidate_backup_cache()
         return {
             "backup": backup,
             "cleared": cleared,

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent.main import NetworkAgent
+from agent.main import main as agent_main
 
 
 if __name__ == "__main__":
@@ -12,5 +12,5 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Missing agent config: {config_path}")
 
     print(f"[*] Starting SOC Agent using config: {config_path}")
-    NetworkAgent(config_path).start()
+    agent_main(config_path)
 

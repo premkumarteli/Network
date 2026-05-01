@@ -14,7 +14,12 @@ NetVisor MVP is a single-organization, self-hosted threat detection and SOC-styl
 
 ## Gateway Design
 
-The MVP gateway is a software-based packet capture service using Scapy.
+The gateway packet path is pluggable.
+
+Preferred capture order:
+
+1. Linux-native raw socket capture when the gateway is on Linux and an interface is configured
+2. Scapy fallback for unsupported hosts, development, and probe mode
 
 It runs in one of two modes:
 

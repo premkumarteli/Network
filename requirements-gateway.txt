@@ -1,0 +1,6 @@
+# NetVisor gateway collector dependencies
+requests
+cryptography
+scapy
+colorama
+python-dotenv

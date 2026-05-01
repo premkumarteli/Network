@@ -1,4 +1,49 @@
+const GENERIC_TRANSPORT_APPLICATIONS = new Set([
+  'ARP',
+  'DHCP',
+  'DNS',
+  'HTTP',
+  'HTTPS',
+  'ICMP',
+  'ICMPV6',
+  'LLMNR',
+  'MDNS',
+  'NBDS',
+  'NBNS',
+  'NTP',
+  'QUIC',
+  'SSDP',
+  'TCP',
+  'TLS',
+  'UDP',
+]);
+
+const NETWORK_SERVICE_APPLICATIONS = new Set([
+  ...GENERIC_TRANSPORT_APPLICATIONS,
+  'OTHER',
+  'UNKNOWN',
+]);
+
+const NETWORK_SERVICE_VISUAL = {
+  icon: 'ri-radar-line',
+  accent: '#38bdf8',
+  background: 'rgba(56, 189, 248, 0.14)',
+  label: 'SV',
+};
+
 const APP_VISUALS = {
+  Grammarly: {
+    icon: 'ri-edit-line',
+    accent: '#22c55e',
+    background: 'rgba(34, 197, 94, 0.14)',
+    label: 'GR',
+  },
+  'Azure CloudApp': {
+    icon: 'ri-cloud-line',
+    accent: '#38bdf8',
+    background: 'rgba(56, 189, 248, 0.14)',
+    label: 'AZ',
+  },
   YouTube: {
     icon: "ri-youtube-fill",
     accent: "#ff3b30",
@@ -35,11 +80,53 @@ const APP_VISUALS = {
     background: "rgba(66, 133, 244, 0.14)",
     label: "G",
   },
+  'Google Services': {
+    icon: "ri-google-fill",
+    accent: "#34d399",
+    background: "rgba(52, 211, 153, 0.14)",
+    label: "GS",
+  },
   Microsoft: {
     icon: "ri-windows-fill",
     accent: "#5e5ce6",
     background: "rgba(94, 92, 230, 0.14)",
     label: "MS",
+  },
+  'Amazon CloudFront': {
+    icon: 'ri-cloud-line',
+    accent: '#f59e0b',
+    background: 'rgba(245, 158, 11, 0.14)',
+    label: 'CF',
+  },
+  'App Insights': {
+    icon: 'ri-line-chart-line',
+    accent: '#f97316',
+    background: 'rgba(249, 115, 22, 0.14)',
+    label: 'AI',
+  },
+  'Visual Studio Code': {
+    icon: 'ri-code-s-line',
+    accent: '#3b82f6',
+    background: 'rgba(59, 130, 246, 0.14)',
+    label: 'VS',
+  },
+  Windows: {
+    icon: 'ri-windows-fill',
+    accent: '#60a5fa',
+    background: 'rgba(96, 165, 250, 0.14)',
+    label: 'WN',
+  },
+  'Windows Activity': {
+    icon: 'ri-windows-fill',
+    accent: '#60a5fa',
+    background: 'rgba(96, 165, 250, 0.14)',
+    label: 'WA',
+  },
+  MSN: {
+    icon: 'ri-newspaper-line',
+    accent: '#0ea5e9',
+    background: 'rgba(14, 165, 233, 0.14)',
+    label: 'MS',
   },
   GitHub: {
     icon: "ri-github-fill",
@@ -61,7 +148,26 @@ const APP_VISUALS = {
   },
 };
 
+function normalizeApplicationName(appName) {
+  return String(appName || '').trim().toUpperCase();
+}
+
+export function isGenericTransportApplication(appName) {
+  return GENERIC_TRANSPORT_APPLICATIONS.has(normalizeApplicationName(appName));
+}
+
+export function isNetworkServiceApplication(appName) {
+  return NETWORK_SERVICE_APPLICATIONS.has(normalizeApplicationName(appName));
+}
+
+export function getApplicationKind(appName) {
+  return isNetworkServiceApplication(appName) ? 'network-service' : 'product';
+}
+
 export function getApplicationVisual(appName) {
+  if (isNetworkServiceApplication(appName)) {
+    return NETWORK_SERVICE_VISUAL;
+  }
   return APP_VISUALS[appName] || APP_VISUALS.Other;
 }
 

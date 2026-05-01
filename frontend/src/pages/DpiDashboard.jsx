@@ -1,268 +1,283 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { systemService } from '../services/api';
-import './DpiDashboard.css';
+import PageHeader from '../components/V2/PageHeader';
+import SectionCard from '../components/V2/SectionCard';
+import MetricCard from '../components/V2/MetricCard';
+import DataTable from '../components/V2/DataTable';
+import StatusBadge from '../components/V2/StatusBadge';
+import WebEvidenceDrawer from '../components/DPI/WebEvidenceDrawer';
+import { TableSkeleton } from '../components/UI/Skeletons';
+import { formatUtcTimestampToLocal } from '../utils/time';
+import { formatBrowserLabel, getRiskTone } from '../utils/presentation';
+import { getWebEvidencePrimaryLabel, getWebEvidenceScopeLabel, matchesWebEvidenceFilters, normalizeWebRiskLevel } from '../utils/webEvidence';
 
 const MAX_EVENTS = 100;
 
-// Real status will come from web_inspection_service via API
-const fetchDpiStatus = async () => {
-  try {
-    const res = await systemService.getDpiGlobalStatus();
-    return res.data;
-  } catch (err) {
-    return {
-      state: 'enabled',
-      proxy: 'running',
-      certificate: 'installed',
-      lastActivity: new Date().toISOString(),
-      eps: 0,
-    };
-  }
-};
-
-const DPI_STATUS_MAP = {
-  enabled: { text: 'Enabled', color: 'text-green-500' },
-  disabled: { text: 'Disabled', color: 'text-red-500' },
-  degraded: { text: 'Degraded', color: 'text-yellow-500' },
-};
-
-const PROXY_STATUS_MAP = {
-  running: { text: 'Running', color: 'text-green-500' },
-  stopped: { text: 'Stopped', color: 'text-red-500' },
-};
-
-const CERT_STATUS_MAP = {
-  installed: { text: 'Installed', color: 'text-green-500' },
-  not_installed: { text: 'Not Installed', color: 'text-red-500' },
-};
-
-function StatusIndicator({ status, statusMap }) {
-  const { text, color } = statusMap[status] || { text: 'Unknown', color: 'text-gray-500' };
-  return <span className={color}>{text}</span>;
-}
-
-function DpiStatus({ status }) {
-  return (
-    <div className="summary-grid">
-      <div className="summary-card">
-        <span className="summary-label">DPI State</span>
-        <strong>
-          <StatusIndicator status={status.state} statusMap={DPI_STATUS_MAP} />
-        </strong>
-      </div>
-      <div className="summary-card">
-        <span className="summary-label">Proxy</span>
-        <strong>
-          <StatusIndicator status={status.proxy} statusMap={PROXY_STATUS_MAP} />
-        </strong>
-      </div>
-      <div className="summary-card">
-        <span className="summary-label">Certificate</span>
-        <strong>
-          <StatusIndicator status={status.certificate} statusMap={CERT_STATUS_MAP} />
-        </strong>
-      </div>
-      <div className="summary-card">
-        <span className="summary-label">Last Activity</span>
-        <strong>
-          {status.lastActivity ? new Date(status.lastActivity).toLocaleTimeString() : '—'}
-        </strong>
-      </div>
-      <div className="summary-card">
-        <span className="summary-label">Events/sec</span>
-        <strong>{status.eps.toFixed(1)}</strong>
-      </div>
-    </div>
-  );
-}
-
-function EventTable({ events }) {
-  const getEventType = (event) => {
-    if (event.search_query) return 'Search';
-    if (event.domain && event.domain.includes('youtube.com')) return 'Video';
-    return 'Browse';
-  };
-
-  return (
-    <div className="activity-log">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Application</th>
-            <th>Domain</th>
-            <th>Title</th>
-            <th>Search Query</th>
-            <th>Type</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {events.length === 0 ? (
-            <tr>
-              <td colSpan="7" className="empty-state">No activity recorded yet...</td>
-            </tr>
-          ) : (
-            events.map((event, i) => (
-              <tr key={i} className={`fade-in ${event.isNew ? 'bg-highlight' : ''}`}>
-                <td className="mono">{new Date(event.timestamp).toLocaleTimeString()}</td>
-                <td>
-                   <div className="table-primary">{event.app || 'Unknown'}</div>
-                </td>
-                <td className="mono">{event.domain}</td>
-                <td className="table-meta">{event.title || '-'}</td>
-                <td className="mono muted">{event.search_query || '-'}</td>
-                <td>
-                  <span className={`badge ${event.search_query ? 'warning' : event.domain?.includes('youtube.com') ? 'danger' : 'neutral'}`}>
-                    {getEventType(event)}
-                  </span>
-                </td>
-                <td>
-                  <span className="badge success">Inspected</span>
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="empty-dashboard-state">
-      <div className="empty-icon"><i className="ri-eye-off-line"></i></div>
-      <h3>No DPI activity detected</h3>
-      <div className="empty-help">
-        <p>Ensure the following are configured:</p>
-        <ul>
-          <li><i className="ri-checkbox-circle-line"></i> DPI enabled in Device Settings</li>
-          <li><i className="ri-checkbox-circle-line"></i> NetVisor Proxy running on Agent</li>
-          <li><i className="ri-checkbox-circle-line"></i> Root Certificate installed in Browser</li>
-          <li><i className="ri-checkbox-circle-line"></i> Device using NetVisor Gateway</li>
-        </ul>
-      </div>
-    </div>
-  );
-}
-
-function DebugPanel({ event }) {
-  const [isOpen, setIsOpen] = useState(false);
-
-  return (
-    <div className="fixed bottom-0 right-0 bg-gray-800 text-white p-4 rounded-tl-lg shadow-lg w-1/3">
-      <button onClick={() => setIsOpen(!isOpen)} className="font-bold">
-        {isOpen ? '▼' : '▲'} Debug: Latest Event
-      </button>
-      {isOpen && (
-        <pre className="mt-4 text-xs whitespace-pre-wrap">
-          {JSON.stringify(event, null, 2)}
-        </pre>
-      )}
-    </div>
-  );
-}
-
-
-export default function DpiDashboard() {
+const DpiDashboard = () => {
+  const navigate = useNavigate();
   const [events, setEvents] = useState([]);
+  const [evidenceGroups, setEvidenceGroups] = useState([]);
   const [status, setStatus] = useState({ state: 'disabled', proxy: 'stopped', certificate: 'not_installed', lastActivity: null, eps: 0 });
-  const [filters, setFilters] = useState({ search: '', app: '', domain: '', status: 'all' });
-  const [wsStatus, setWsStatus] = useState('disconnected');
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState({ query: '', domain: '', risk: 'all' });
+  const [selectedEvidence, setSelectedEvidence] = useState(null);
 
-  // Fetch initial status
-  useEffect(() => {
-    const getStatus = async () => {
-      // const res = await systemService.getDpiStatus();
-      // setStatus(res.data);
-      const mockStatus = await fetchDpiStatus();
-      setStatus(mockStatus);
-    };
-    getStatus();
-    const interval = setInterval(getStatus, 10000);
-    return () => clearInterval(interval);
+  const fetchData = useCallback(async ({ background = false } = {}) => {
+    if (!background) {
+      setLoading(true);
+    }
+    try {
+      const [statusRes, eventsRes, groupsRes] = await Promise.all([
+        systemService.getDpiGlobalStatus(),
+        systemService.getGlobalWebActivity(100),
+        systemService.getGlobalWebEvidenceGroups(50),
+      ]);
+      setStatus(statusRes.data || { state: 'disabled', proxy: 'stopped', certificate: 'not_installed', lastActivity: null, eps: 0 });
+      const payload = Array.isArray(eventsRes.data) ? eventsRes.data : (eventsRes.data?.activity || []);
+      setEvents(payload);
+      const groupedPayload = Array.isArray(groupsRes.data) ? groupsRes.data : (groupsRes.data?.activity || []);
+      setEvidenceGroups(groupedPayload);
+    } catch (error) {
+      console.error('Failed to load DPI dashboard', error);
+    } finally {
+      if (!background) {
+        setLoading(false);
+      }
+    }
   }, []);
 
-  // WebSocket for real-time DPI events
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   const handleDpiEvent = useCallback((event) => {
     setEvents((prev) => [{ ...event, isNew: true }, ...prev].slice(0, MAX_EVENTS));
-    setStatus(s => ({ ...s, lastActivity: event.timestamp }));
-    
-    // Remove highlight after a short delay
-    setTimeout(() => {
-      setEvents(currentEvents =>
-        currentEvents.map(e => (e.id === event.id ? { ...e, isNew: false } : e))
-      );
-    }, 2000);
+    setStatus((current) => ({ ...current, lastActivity: event.timestamp || event.last_seen }));
   }, []);
 
-  useWebSocket('dpi_event', handleDpiEvent, {
-    onOpen: () => setWsStatus('connected'),
-    onClose: () => setWsStatus('disconnected'),
-  });
+  const { status: wsStatus } = useWebSocket('dpi_event', handleDpiEvent);
 
-  // Filtering
-  const filteredEvents = events.filter((e) => {
-    if (filters.status !== 'all' && e.status !== filters.status) return false;
-    if (filters.app && e.app !== filters.app) return false;
-    if (filters.domain && !e.domain.includes(filters.domain)) return false;
-    if (filters.search && !(
-      (e.domain && e.domain.toLowerCase().includes(filters.search.toLowerCase())) ||
-      (e.title && e.title.toLowerCase().includes(filters.search.toLowerCase())) ||
-      (e.search_query && e.search_query.toLowerCase().includes(filters.search.toLowerCase()))
-    )) return false;
-    return true;
-  });
+  const filteredEvents = useMemo(
+    () => events.filter((event) => matchesWebEvidenceFilters(event, filters)),
+    [events, filters],
+  );
 
-  const latestEvent = events.length > 0 ? events[0] : null;
+  const filteredGroups = useMemo(
+    () => evidenceGroups.filter((event) => matchesWebEvidenceFilters(event, filters)),
+    [evidenceGroups, filters],
+  );
+
+  const groupedColumns = [
+    {
+      key: 'activity',
+      label: 'Activity',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary">{getWebEvidencePrimaryLabel(row)}</div>
+          <div className="nv-table__meta">{row.base_domain || row.page_url || '-'}</div>
+          <div className="nv-table__meta">{getWebEvidenceScopeLabel(row).text}</div>
+        </>
+      ),
+    },
+    {
+      key: 'device',
+      label: 'Device',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary mono">{row.device_ip || '-'}</div>
+          <div className="nv-table__meta">{formatBrowserLabel(row.browser_name, row.process_name)}</div>
+        </>
+      ),
+    },
+    {
+      key: 'scope',
+      label: 'Scope',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary">{getWebEvidenceScopeLabel(row).eventCount} event{getWebEvidenceScopeLabel(row).eventCount === 1 ? '' : 's'}</div>
+          <div className="nv-table__meta">{row.content_id || row.content_category || 'web'}</div>
+        </>
+      ),
+    },
+    {
+      key: 'risk',
+      label: 'Risk',
+      render: (row) => {
+        const riskLevel = normalizeWebRiskLevel(row.risk_level);
+        return <StatusBadge tone={getRiskTone(riskLevel)}>{riskLevel}</StatusBadge>;
+      },
+    },
+    {
+      key: 'last_seen',
+      label: 'Last Seen',
+      render: (row) => <span className="mono">{formatUtcTimestampToLocal(row.last_seen || row.timestamp || row.created_at)}</span>,
+    },
+  ];
+
+  const rawColumns = [
+    {
+      key: 'activity',
+      label: 'Activity',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary">{row.page_title || 'Untitled page'}</div>
+          <div className="nv-table__meta">{row.page_url || row.base_domain || row.domain || '-'}</div>
+        </>
+      ),
+    },
+    {
+      key: 'device',
+      label: 'Device',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary mono">{row.device_ip || '-'}</div>
+          <div className="nv-table__meta">{formatBrowserLabel(row.browser_name, row.process_name)}</div>
+        </>
+      ),
+    },
+    {
+      key: 'category',
+      label: 'Category',
+      render: (row) => (
+        <>
+          <div className="nv-table__primary">{row.content_category || 'web'}</div>
+          <div className="nv-table__meta">{row.search_query || row.content_id || '-'}</div>
+        </>
+      ),
+    },
+    {
+      key: 'risk',
+      label: 'Risk',
+      render: (row) => {
+        const riskLevel = normalizeWebRiskLevel(row.risk_level);
+        return <StatusBadge tone={getRiskTone(riskLevel)}>{riskLevel}</StatusBadge>;
+      },
+    },
+    {
+      key: 'last_seen',
+      label: 'Last Seen',
+      render: (row) => <span className="mono">{formatUtcTimestampToLocal(row.last_seen || row.timestamp || row.created_at)}</span>,
+    },
+  ];
 
   return (
-    <div className="page-shell">
-      <div className="max-w-7xl mx-auto w-100">
-        <header className="header">
-          <h1 className="text-2xl font-bold">DPI Dashboard</h1>
-          {wsStatus === 'disconnected' && <div className="badge danger">WebSocket disconnected. Reconnecting...</div>}
-        </header>
+    <div className="nv-page nv-page--balanced">
+      <PageHeader
+        eyebrow="Investigation"
+        title="Web Inspection"
+        description="Operate the browser-inspection feed from one evidence-first workspace with consistent filters and direct device drill-down."
+        actions={(
+          <>
+            <StatusBadge tone={wsStatus === 'connected' ? 'success' : 'warning'} icon="ri-broadcast-line">
+              {wsStatus === 'connected' ? 'Live Feed' : 'Reconnecting'}
+            </StatusBadge>
+            <button type="button" className="nv-button nv-button--secondary" onClick={() => fetchData()}>
+              <i className="ri-refresh-line"></i>
+              Refresh
+            </button>
+          </>
+        )}
+      />
 
-        <section className="glass-panel mt-6 p-4">
-          <DpiStatus status={status} />
-        </section>
-
-        <section className="mt-6">
-          <div className="flex items-center space-x-4 mb-4">
-            <input
-              type="text"
-              placeholder="Search..."
-              className="flex-grow"
-              value={filters.search}
-              onChange={e => setFilters(f => ({ ...f, search: e.target.value }))}
-            />
-            <input
-              type="text"
-              placeholder="Domain..."
-              value={filters.domain}
-              onChange={e => setFilters(f => ({ ...f, domain: e.target.value }))}
-            />
-            <select value={filters.status} onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
-              <option value="all">All Statuses</option>
-              <option value="allowed">Allowed</option>
-              <option value="blocked">Blocked</option>
-            </select>
-          </div>
-          
-          <div className="glass-panel mt-6 overflow-hidden">
-            {filteredEvents.length > 0 ? (
-              <EventTable events={filteredEvents} />
-            ) : (
-              <EmptyState />
-            )}
-          </div>
-        </section>
-        
-        {latestEvent && <DebugPanel event={latestEvent} />}
+      <div className="nv-metric-grid">
+        <MetricCard icon="ri-navigation-line" label="Inspection State" value={status.state} meta="Global inspection posture" accent="#54c8e8" />
+        <MetricCard icon="ri-route-line" label="Proxy" value={status.proxy} meta="Agent-side explicit proxy" accent="#60a5fa" />
+        <MetricCard icon="ri-award-line" label="Certificate" value={status.certificate} meta="Root CA trust state" accent="#2dd4bf" />
+        <MetricCard icon="ri-flashlight-line" label="Events / Sec" value={(Number(status.eps) || 0).toFixed(1)} meta={status.lastActivity ? `Last activity ${formatUtcTimestampToLocal(status.lastActivity)}` : 'No recent activity'} accent="#fbbf24" />
       </div>
+
+      <SectionCard title="Evidence Groups" caption="Correlated Browser Sessions" className="nv-section--balanced">
+        <div className="nv-filterbar">
+          <div className="nv-filterbar__group">
+            <label className="nv-field nv-field--grow">
+              <i className="ri-search-line"></i>
+              <input
+                type="search"
+                placeholder="Search title, URL, browser, query..."
+                value={filters.query}
+                onChange={(event) => setFilters((current) => ({ ...current, query: event.target.value }))}
+              />
+            </label>
+            <label className="nv-field">
+              <input
+                type="text"
+                placeholder="Domain..."
+                value={filters.domain}
+                onChange={(event) => setFilters((current) => ({ ...current, domain: event.target.value }))}
+              />
+            </label>
+            <label className="nv-field">
+              <select value={filters.risk} onChange={(event) => setFilters((current) => ({ ...current, risk: event.target.value }))}>
+                <option value="all">All Risk</option>
+                <option value="safe">Safe</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div className="nv-scroll-region nv-scroll-region--xl">
+          {loading ? (
+            <TableSkeleton rows={6} />
+          ) : (
+            <DataTable
+              columns={groupedColumns}
+              rows={filteredGroups}
+              rowKey={(row, index) => row.group_key || `${row.page_url || row.base_domain}-${index}`}
+              onRowClick={(row) => setSelectedEvidence(row)}
+              emptyTitle="No grouped evidence detected"
+              emptyDescription="Enable inspection on a managed device and browse through the NetVisor launchers to populate correlated evidence clusters."
+            />
+          )}
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Raw Browser Sessions" caption="Global Feed" className="nv-section--balanced">
+        <div className="nv-scroll-region nv-scroll-region--xl">
+          {loading ? (
+            <TableSkeleton rows={6} />
+          ) : (
+            <DataTable
+              columns={rawColumns}
+              rows={filteredEvents}
+              rowKey={(row, index) => row.id || `${row.page_url || row.base_domain}-${index}`}
+              onRowClick={(row) => {
+                if (row.device_ip) {
+                  navigate(`/user/${encodeURIComponent(row.device_ip)}`);
+                }
+              }}
+              emptyTitle="No DPI activity detected"
+              emptyDescription="Ensure inspection is enabled on a managed device, the proxy is running, and browsing happens through the NetVisor launchers."
+            />
+          )}
+        </div>
+      </SectionCard>
+
+      <WebEvidenceDrawer
+        open={Boolean(selectedEvidence)}
+        item={selectedEvidence}
+        onClose={() => setSelectedEvidence(null)}
+        footer={selectedEvidence ? (
+          <div className="nv-inline-actions">
+            {selectedEvidence.device_ip ? (
+              <>
+                <button type="button" className="nv-button nv-button--secondary" onClick={() => navigate(`/user/${encodeURIComponent(selectedEvidence.device_ip)}`)}>
+                  Open Device
+                </button>
+                <button type="button" className="nv-button nv-button--primary" onClick={() => navigate(`/user/${encodeURIComponent(selectedEvidence.device_ip)}/web-activity`)}>
+                  Open Deep Dive
+                </button>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      />
     </div>
   );
-}
+};
+
+export default DpiDashboard;

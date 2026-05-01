@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import time
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import logging
 import json
 
 from ..core.config import settings
+from ..db.session import require_runtime_schema
 from .device_service import device_service
 from .managed_device_service import managed_device_service
 
@@ -15,6 +18,14 @@ logger = logging.getLogger("netvisor.agent_monitoring")
 class AgentService:
     def __init__(self) -> None:
         self._schema_ready = False
+        self._inspection_cache_ttl_seconds = max(float(os.getenv("NETVISOR_HEALTH_CACHE_SECONDS", "10")), 0.0)
+        self._inspection_observability_cache: dict[str, tuple[float, dict]] = {}
+
+    def _invalidate_inspection_cache(self, organization_id: Optional[str] = None) -> None:
+        if organization_id is None:
+            self._inspection_observability_cache.clear()
+            return
+        self._inspection_observability_cache.pop(str(organization_id), None)
 
     def _column_exists(self, cursor, table_name: str, column_name: str) -> bool:
         cursor.execute(
@@ -43,120 +54,8 @@ class AgentService:
     def ensure_schema(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        managed_device_service.ensure_table(db_conn)
-        cursor = db_conn.cursor()
-        try:
-            if not self._column_exists(cursor, "agents", "hostname"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN hostname VARCHAR(100) NULL AFTER name
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "ip_address"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN ip_address VARCHAR(50) NULL AFTER organization_id
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "os_family"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN os_family VARCHAR(50) NULL AFTER ip_address
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "version"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN version VARCHAR(50) NULL AFTER os_family
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_enabled"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_enabled BOOLEAN DEFAULT FALSE AFTER version
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_status"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_status VARCHAR(32) DEFAULT 'disabled' AFTER inspection_enabled
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_proxy_running"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_proxy_running BOOLEAN DEFAULT FALSE AFTER inspection_status
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_ca_installed"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_ca_installed BOOLEAN DEFAULT FALSE AFTER inspection_proxy_running
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_browsers_json"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_browsers_json TEXT NULL AFTER inspection_ca_installed
-                    """
-                )
-
-            if not self._column_exists(cursor, "agents", "inspection_last_error"):
-                cursor.execute(
-                    """
-                    ALTER TABLE agents
-                    ADD COLUMN inspection_last_error TEXT NULL AFTER inspection_browsers_json
-                    """
-                )
-
-            if not self._index_exists(cursor, "agents", "idx_agents_org_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_agents_org_last_seen
-                    ON agents (organization_id, last_seen)
-                    """
-                )
-
-            if not self._index_exists(cursor, "devices", "idx_devices_agent_org_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_devices_agent_org_last_seen
-                    ON devices (agent_id, organization_id, last_seen)
-                    """
-                )
-
-            cursor.execute(
-                """
-                UPDATE agents a
-                LEFT JOIN managed_devices md ON md.agent_id = a.id
-                SET
-                    a.hostname = COALESCE(NULLIF(a.hostname, ''), NULLIF(a.name, ''), NULLIF(md.hostname, ''), 'Unknown'),
-                    a.ip_address = COALESCE(NULLIF(a.ip_address, ''), NULLIF(md.device_ip, ''), a.ip_address),
-                    a.os_family = COALESCE(NULLIF(a.os_family, ''), NULLIF(md.os_family, ''), a.os_family)
-                """
-            )
-            db_conn.commit()
-            self._schema_ready = True
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def upsert_agent(
         self,
@@ -170,13 +69,15 @@ class AgentService:
         os_family: Optional[str] = None,
         version: Optional[str] = None,
         inspection_state: Optional[dict] = None,
+        cpu_usage: float = 0.0,
+        ram_usage: float = 0.0,
     ) -> None:
         if not agent_id:
             return
 
         self.ensure_schema(db_conn)
 
-        cursor = db_conn.cursor()
+        cursor = db_conn.cursor(dictionary=True)
         try:
             normalized_hostname = (hostname or "Unknown").strip() or "Unknown"
             normalized_ip = (ip_address or "").strip() or None
@@ -189,15 +90,30 @@ class AgentService:
             inspection_ca_installed = bool(inspection_state.get("ca_installed"))
             inspection_browsers_json = json.dumps(inspection_state.get("browser_support") or [])
             inspection_last_error = inspection_state.get("last_error")
+            inspection_metrics_json = json.dumps(inspection_state.get("metrics") or {})
+
+            # Check current CA installation status for audit logging
+            previous_ca_installed = None
+            if organization_id:  # Only check if we have an org_id (avoid checking during bootstrap)
+                cursor.execute(
+                    """
+                    SELECT inspection_ca_installed FROM agents WHERE id = %s
+                    """,
+                    (agent_id,),
+                )
+                result = cursor.fetchone()
+                if result:
+                    previous_ca_installed = bool(result['inspection_ca_installed'])
 
             cursor.execute(
                 """
                 INSERT INTO agents (
                     id, name, hostname, api_key, organization_id, ip_address, os_family, version,
                     inspection_enabled, inspection_status, inspection_proxy_running, inspection_ca_installed,
-                    inspection_browsers_json, inspection_last_error, last_seen
+                    inspection_browsers_json, inspection_last_error, inspection_metrics_json,
+                    last_seen, cpu_usage, ram_usage
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s)
                 ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     hostname = VALUES(hostname),
@@ -212,6 +128,9 @@ class AgentService:
                     inspection_ca_installed = VALUES(inspection_ca_installed),
                     inspection_browsers_json = VALUES(inspection_browsers_json),
                     inspection_last_error = VALUES(inspection_last_error),
+                    inspection_metrics_json = VALUES(inspection_metrics_json),
+                    cpu_usage = VALUES(cpu_usage),
+                    ram_usage = VALUES(ram_usage),
                     last_seen = UTC_TIMESTAMP()
                 """,
                 (
@@ -229,9 +148,35 @@ class AgentService:
                     inspection_ca_installed,
                     inspection_browsers_json,
                     inspection_last_error,
+                    inspection_metrics_json,
+                    cpu_usage,
+                    ram_usage,
                 ),
             )
             db_conn.commit()
+            
+            # Audit log for CA installation changes
+            if organization_id and previous_ca_installed is not None:
+                try:
+                    from ..services.audit_service import audit_service
+                    # We don't have easy access to username here since this is a service method
+                    # In a real implementation, we might pass user context or use system auditing
+                    if inspection_ca_installed != previous_ca_installed:
+                        action = "ca_installed" if inspection_ca_installed else "ca_removed"
+                        audit_service.log_ca_operation(
+                            organization_id=str(organization_id),
+                            username="system",  # Service-level action, not user-initiated
+                            operation=action
+                        )
+                except ImportError:
+                    # Audit service might not be available in all contexts
+                    pass
+                except Exception as exc:
+                    # Don't let audit logging failures break the main operation
+                    logger.debug(f"Audit logging failed for CA operation: {exc}")
+
+            self._invalidate_inspection_cache(organization_id)
+                    
         finally:
             cursor.close()
 
@@ -277,6 +222,7 @@ class AgentService:
             if heartbeat_age_seconds is not None and heartbeat_age_seconds <= online_window_seconds
             else "Offline"
         )
+        inspection_metrics = self._json_object(row.get("inspection_metrics_json"))
 
         return {
             "agent_id": row.get("agent_id") or row.get("id") or "",
@@ -289,11 +235,37 @@ class AgentService:
             "os_family": row.get("os_family") or row.get("managed_os_family") or "Unknown",
             "version": row.get("version") or "Unknown",
             "inspection_enabled": bool(row.get("inspection_enabled")),
+            "inspection_privacy_guard_enabled": bool(inspection_metrics.get("privacy_guard_enabled", True)),
+            "inspection_sensitive_destination_bypass_enabled": bool(inspection_metrics.get("sensitive_destination_bypass_enabled", True)),
             "inspection_status": row.get("inspection_status") or "disabled",
             "inspection_proxy_running": bool(row.get("inspection_proxy_running")),
             "inspection_ca_installed": bool(row.get("inspection_ca_installed")),
             "inspection_browsers": self._json_list(row.get("inspection_browsers_json")),
             "inspection_last_error": row.get("inspection_last_error"),
+            "inspection_ca_status": inspection_metrics.get("ca_status"),
+            "inspection_thumbprint_sha256": inspection_metrics.get("thumbprint_sha256"),
+            "inspection_cert_issued_at": inspection_metrics.get("issued_at"),
+            "inspection_cert_expires_at": inspection_metrics.get("expires_at"),
+            "inspection_rotation_due_at": inspection_metrics.get("rotation_due_at"),
+            "inspection_days_until_expiry": inspection_metrics.get("days_until_expiry"),
+            "inspection_days_until_rotation_due": inspection_metrics.get("days_until_rotation_due"),
+            "inspection_expires_soon": bool(inspection_metrics.get("expires_soon")) if inspection_metrics.get("expires_soon") is not None else None,
+            "inspection_rotation_due_soon": bool(inspection_metrics.get("rotation_due_soon")) if inspection_metrics.get("rotation_due_soon") is not None else None,
+            "inspection_trust_store_match": bool(inspection_metrics.get("trust_store_match")),
+            "inspection_trust_scope": inspection_metrics.get("trust_scope"),
+            "inspection_key_protection": inspection_metrics.get("key_protection"),
+            "inspection_proxy_pid": inspection_metrics.get("proxy_pid"),
+            "inspection_proxy_port": inspection_metrics.get("proxy_port"),
+            "inspection_queue_size": int(inspection_metrics.get("queue_size") or 0),
+            "inspection_spooled_event_count": int(inspection_metrics.get("spooled_event_count") or 0),
+            "inspection_dropped_event_count": int(inspection_metrics.get("dropped_event_count") or 0),
+            "inspection_uploaded_event_count": int(inspection_metrics.get("uploaded_event_count") or 0),
+            "inspection_upload_failures": int(inspection_metrics.get("upload_failures") or 0),
+            "inspection_last_event_at": inspection_metrics.get("last_event_at"),
+            "inspection_last_upload_at": inspection_metrics.get("last_upload_at"),
+            "inspection_drop_reasons": inspection_metrics.get("drop_reasons") or {},
+            "cpu_usage": float(row.get("cpu_usage") or 0.0),
+            "ram_usage": float(row.get("ram_usage") or 0.0),
         }
 
     def _json_list(self, value) -> list[str]:
@@ -304,6 +276,34 @@ class AgentService:
         except (TypeError, ValueError):
             return []
         return [str(item) for item in parsed if str(item).strip()]
+
+    def _json_object(self, value) -> dict:
+        if not value:
+            return {}
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _is_placeholder_agent_row(self, row: dict) -> bool:
+        agent_id = str(row.get("agent_id") or row.get("id") or "").strip().upper()
+        name = str(row.get("name") or "").strip().upper()
+        hostname = str(row.get("hostname") or row.get("managed_hostname") or "").strip().lower()
+
+        placeholder_prefixes = ("AGENT-TEST-", "TEST-", "DEMO-", "SAMPLE-", "FAKE-")
+        placeholder_names = {"test", "demo", "sample", "fake", "placeholder"}
+
+        if any(agent_id.startswith(prefix) for prefix in placeholder_prefixes):
+            return True
+        if any(name.startswith(prefix) for prefix in placeholder_prefixes):
+            return True
+        if hostname in placeholder_names:
+            return True
+        return False
+
+    def _filter_placeholder_agents(self, rows: list[dict]) -> list[dict]:
+        return [row for row in rows if not self._is_placeholder_agent_row(row)]
 
     def _fetch_agents(self, db_conn, organization_id: Optional[str] = None) -> list[dict]:
         self.ensure_schema(db_conn)
@@ -325,8 +325,11 @@ class AgentService:
                     a.inspection_ca_installed,
                     a.inspection_browsers_json,
                     a.inspection_last_error,
+                    a.inspection_metrics_json,
                     a.organization_id,
                     a.last_seen,
+                    a.cpu_usage,
+                    a.ram_usage,
                     md.hostname AS managed_hostname,
                     md.device_ip AS managed_ip,
                     md.os_family AS managed_os_family
@@ -338,7 +341,7 @@ class AgentService:
                 params.append(organization_id)
             query += " ORDER BY a.last_seen DESC"
             cursor.execute(query, tuple(params))
-            return cursor.fetchall()
+            return self._filter_placeholder_agents(cursor.fetchall())
         finally:
             cursor.close()
 
@@ -396,6 +399,60 @@ class AgentService:
             )
             for row in rows
         ]
+
+    def get_inspection_observability(
+        self,
+        db_conn,
+        organization_id: Optional[str] = None,
+    ) -> dict:
+        cache_key = str(organization_id or "__all__")
+        now = time.monotonic()
+        cached = self._inspection_observability_cache.get(cache_key)
+        if cached and (now - cached[0]) < self._inspection_cache_ttl_seconds:
+            return dict(cached[1])
+
+        rows = self._fetch_agents(db_conn, organization_id=organization_id)
+        overview = {
+            "agents_reporting": len(rows),
+            "inspection_enabled_agents": 0,
+            "proxy_running_agents": 0,
+            "privacy_guard_enabled_agents": 0,
+            "sensitive_destination_bypass_enabled_agents": 0,
+            "queue_size_total": 0,
+            "spooled_event_count_total": 0,
+            "dropped_event_count_total": 0,
+            "uploaded_event_count_total": 0,
+            "upload_failures_total": 0,
+            "last_event_at": None,
+            "last_upload_at": None,
+        }
+
+        for row in rows:
+            metrics = self._json_object(row.get("inspection_metrics_json"))
+            if bool(row.get("inspection_enabled")):
+                overview["inspection_enabled_agents"] += 1
+            if bool(metrics.get("privacy_guard_enabled", True)):
+                overview["privacy_guard_enabled_agents"] += 1
+            if bool(metrics.get("sensitive_destination_bypass_enabled", True)):
+                overview["sensitive_destination_bypass_enabled_agents"] += 1
+            if bool(row.get("inspection_proxy_running")):
+                overview["proxy_running_agents"] += 1
+            overview["queue_size_total"] += int(metrics.get("queue_size") or 0)
+            overview["spooled_event_count_total"] += int(metrics.get("spooled_event_count") or 0)
+            overview["dropped_event_count_total"] += int(metrics.get("dropped_event_count") or 0)
+            overview["uploaded_event_count_total"] += int(metrics.get("uploaded_event_count") or 0)
+            overview["upload_failures_total"] += int(metrics.get("upload_failures") or 0)
+
+            last_event_at = metrics.get("last_event_at")
+            if last_event_at and (not overview["last_event_at"] or str(last_event_at) > str(overview["last_event_at"])):
+                overview["last_event_at"] = last_event_at
+
+            last_upload_at = metrics.get("last_upload_at")
+            if last_upload_at and (not overview["last_upload_at"] or str(last_upload_at) > str(overview["last_upload_at"])):
+                overview["last_upload_at"] = last_upload_at
+
+        self._inspection_observability_cache[cache_key] = (now, dict(overview))
+        return overview
 
     def _merge_device_rows(self, managed_rows: list[dict], observed_rows: list[dict]) -> list[dict]:
         merged: dict[str, dict] = {}

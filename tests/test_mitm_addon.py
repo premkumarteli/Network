@@ -47,6 +47,7 @@ def test_build_event_extracts_browser_title_and_url(monkeypatch):
     assert event["process_name"] == "chrome.exe"
     assert event["page_title"] == "Cool Video"
     assert event["content_id"] == "abc123"
+    assert "headers" not in event
 
 
 def test_build_event_maps_edge_to_msedge_process(monkeypatch):
@@ -71,3 +72,36 @@ def test_build_event_maps_edge_to_msedge_process(monkeypatch):
     assert event is not None
     assert event["browser_name"] == "Edge"
     assert event["process_name"] == "msedge.exe"
+    assert "headers" not in event
+
+
+def test_build_event_bypasses_sensitive_destinations(monkeypatch):
+    monkeypatch.setattr(mitm_addon, "ALLOWED_DOMAINS", {"paypal.com"})
+    flow = SimpleNamespace(
+        request=SimpleNamespace(
+            pretty_host="www.paypal.com",
+            pretty_url="https://www.paypal.com/signin",
+            method="GET",
+            headers=FakeHeaders({"User-Agent": "Mozilla/5.0 Chrome/123.0"}),
+            raw_content=b"",
+        ),
+        response=SimpleNamespace(
+            headers=FakeHeaders({"Content-Type": "text/html"}),
+            content=b"<html><head><title>PayPal</title></head></html>",
+            status_code=200,
+        ),
+    )
+
+    assert mitm_addon.build_event(flow) is None
+
+
+def test_extract_site_details_builds_github_issue_identifier():
+    category, content_id, search_query, service_name = mitm_addon.extract_site_details(
+        "https://github.com/openai/openai-python/issues/123",
+        "Issue 123",
+    )
+
+    assert category == "dev"
+    assert content_id == "openai/openai-python#123"
+    assert search_query is None
+    assert service_name == "GitHub"

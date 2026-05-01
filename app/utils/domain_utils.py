@@ -7,8 +7,6 @@ from typing import Optional
 import tldextract
 
 
-# Keep extraction offline and in-memory to avoid runtime lock/contention on the
-# package cache when multiple requests/processes classify traffic concurrently.
 _EXTRACTOR = tldextract.TLDExtract(
     suffix_list_urls=(),
     cache_dir=False,
@@ -17,7 +15,6 @@ _EXTRACTOR = tldextract.TLDExtract(
 
 
 def normalize_host(value: object) -> Optional[str]:
-    """Normalize host-like values without making DNS/network calls."""
     if value is None:
         return None
 
@@ -42,12 +39,6 @@ def normalize_host(value: object) -> Optional[str]:
 
 @lru_cache(maxsize=8192)
 def get_base_domain(value: object) -> Optional[str]:
-    """
-    Return the eTLD+1 for a host using the PSL-aware extractor.
-    Examples:
-    - mail.google.com -> google.com
-    - api.whatsapp.net -> whatsapp.net
-    """
     host = normalize_host(value)
     if not host:
         return None
@@ -66,3 +57,6 @@ def get_base_domain(value: object) -> Optional[str]:
     if not extracted.domain or not extracted.suffix:
         return None
     return f"{extracted.domain}.{extracted.suffix}"
+
+
+__all__ = ["get_base_domain", "normalize_host", "_EXTRACTOR"]

@@ -1,0 +1,18 @@
+# NetVisor server runtime dependencies
+python-dotenv
+fastapi
+uvicorn
+python-socketio
+mysql-connector-python
+bcrypt
+pydantic
+pydantic-settings
+python-multipart
+python-jose[cryptography]
+email-validator
+psutil
+numpy
+scikit-learn
+joblib
+tldextract
+geoip2

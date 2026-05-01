@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check repository hygiene
+        shell: bash
+        run: |
+          forbidden="$(git ls-files | grep -E '(^legacy/|^frontend/node_modules/|^frontend/dist/|^build/|(^|/)(all_project_code\.txt|build_all_code\.py|current_env\.txt|agent_id\.txt|gateway_id\.txt|device_inventory\.json)$|(^|/)(server\.(stdout|stderr)\.log|tmp_server_.*\.log)$|^\.pytest_tmp(/|$)|^\.pytest_tmp_.*/)' || true)"
+          if [ -n "$forbidden" ]; then
+            echo "Forbidden tracked files found:"
+            echo "$forbidden"
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-server.txt
+
+      - name: Run backend tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m pytest -q -p no:cacheprovider
+
+      - name: Run security regression tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: >
+          python -m pytest -q -p no:cacheprovider
+          tests/test_agent_request_auth.py
+          tests/test_agent_transport_policy.py
+          tests/test_agent_transport_pins.py
+          tests/test_db_session.py
+          tests/test_route_contract.py
+          tests/test_app_main_import.py
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Build deploy bundles
+        run: python scripts/build_deploy_bundles.py --role server --role agent --role gateway

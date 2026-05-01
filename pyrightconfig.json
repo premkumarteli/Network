@@ -1,6 +1,15 @@
 {
   "venvPath": ".",
-  "venv": ".venv",
+  "venv": ".venv-1",
+  "exclude": [
+    ".git",
+    ".pytest_cache",
+    "frontend/node_modules",
+    "frontend/dist",
+    "legacy",
+    "runtime",
+    "tmp"
+  ],
   "executionEnvironments": [
     {
       "root": ".",

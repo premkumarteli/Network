@@ -1,0 +1,9 @@
+# NetVisor managed endpoint agent dependencies
+requests
+scapy
+colorama
+python-dotenv
+psutil
+cryptography
+tldextract
+mitmproxy

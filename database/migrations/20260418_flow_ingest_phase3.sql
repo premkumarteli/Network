@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS flow_ingest_batches (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_type VARCHAR(16) NOT NULL,
+    source_id VARCHAR(100),
+    organization_id CHAR(36),
+    batch_json LONGTEXT NOT NULL,
+    flow_count INT NOT NULL DEFAULT 1,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    attempt_count INT NOT NULL DEFAULT 0,
+    available_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    claimed_by VARCHAR(100),
+    claimed_at DATETIME NULL,
+    processed_at DATETIME NULL,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_flow_ingest_status_available (status, available_at, id),
+    INDEX idx_flow_ingest_created_at (created_at),
+    INDEX idx_flow_ingest_source (source_type, source_id, created_at)
+);

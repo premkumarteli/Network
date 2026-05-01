@@ -17,6 +17,8 @@ def test_policy_normalizes_process_and_domain_allowlists():
     assert policy.allowed_processes == ["chrome.exe", "msedge.exe"]
     assert policy.allowed_domains == ["youtube.com", "openai.com"]
     assert policy.snippet_max_bytes == 256
+    assert policy.privacy_guard_enabled is True
+    assert policy.sensitive_destination_bypass_enabled is True
 
 
 def test_policy_matches_base_domain_and_process():
@@ -34,3 +36,5 @@ def test_policy_matches_base_domain_and_process():
     assert policy.allows_domain("m.youtube.com")
     assert not policy.allows_process("msedge.exe")
     assert not policy.allows_domain("github.com")
+    assert policy.should_bypass_sensitive_destination("paypal.com")
+    assert not policy.should_bypass_sensitive_destination("github.com")

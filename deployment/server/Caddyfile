@@ -1,0 +1,17 @@
+{
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+{$NETVISOR_PUBLIC_HOSTNAME} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "same-origin"
+    }
+
+    reverse_proxy server:8000
+}

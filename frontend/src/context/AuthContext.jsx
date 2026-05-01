@@ -20,8 +20,11 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    await authService.logout();
-    setUser(null);
+    try {
+      await authService.logout();
+    } finally {
+      setUser(null);
+    }
   };
 
   useEffect(() => {

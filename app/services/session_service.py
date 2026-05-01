@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha1
 from typing import Optional
 
+from ..db.session import require_runtime_schema
 
 class SessionService:
     def __init__(self) -> None:
@@ -11,35 +12,8 @@ class SessionService:
     def ensure_table(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        cursor = db_conn.cursor()
-        try:
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id CHAR(40) PRIMARY KEY,
-                    organization_id CHAR(36),
-                    device_ip VARCHAR(50) NOT NULL,
-                    device_mac VARCHAR(20) DEFAULT NULL,
-                    external_ip VARCHAR(50) DEFAULT NULL,
-                    application VARCHAR(50) NOT NULL DEFAULT 'Other',
-                    domain VARCHAR(255) DEFAULT NULL,
-                    protocol VARCHAR(10) DEFAULT NULL,
-                    source_type VARCHAR(16) DEFAULT 'agent',
-                    total_packets BIGINT DEFAULT 0,
-                    total_bytes BIGINT DEFAULT 0,
-                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    duration FLOAT DEFAULT 0,
-                    INDEX idx_sessions_org_last_seen (organization_id, last_seen),
-                    INDEX idx_sessions_device_last_seen (device_ip, last_seen),
-                    INDEX idx_sessions_app_last_seen (application, last_seen)
-                )
-                """
-            )
-            db_conn.commit()
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def build_session_id(
         self,

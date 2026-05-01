@@ -9,11 +9,20 @@ import os
 
 from .core.config import settings
 from .api.router import api_router
-from .realtime import configure_socket_server
+from .realtime import (
+    AUTHENTICATED_SOCKET_ROOM,
+    SocketAuthenticationError,
+    authenticate_socket_connection,
+    configure_socket_server,
+    socket_room_for_organization,
+)
 from .db.session import ensure_bootstrap_state, get_db_connection
 from .services.application_service import application_service
+from .middleware.request_context import RequestContextMiddleware
 from .services.system_service import system_service
 from .services.web_inspection_service import web_inspection_service
+from .middleware.csrf_protection import CSRFProtectionMiddleware
+from .middleware.transport_security import TransportSecurityMiddleware
 
 def _resolve_log_level() -> int:
     configured = str(getattr(settings, "LOG_LEVEL", "INFO") or "INFO").upper()
@@ -35,15 +44,33 @@ def _allowed_origins() -> list[str]:
 
 
 def _validate_runtime_config() -> None:
+    normalized_same_site = str(settings.AUTH_COOKIE_SAMESITE or "lax").lower()
+    if normalized_same_site not in {"lax", "strict", "none"}:
+        raise RuntimeError("NETVISOR_AUTH_COOKIE_SAMESITE must be one of: lax, strict, none.")
+    if normalized_same_site == "none" and not settings.AUTH_COOKIE_SECURE:
+        logger.warning("NETVISOR_AUTH_COOKIE_SAMESITE=none without NETVISOR_AUTH_COOKIE_SECURE=true may be rejected by browsers.")
+    normalized_worker_mode = str(settings.FLOW_WORKER_MODE or "embedded").lower()
+    if normalized_worker_mode not in {"embedded", "disabled", "external"}:
+        raise RuntimeError("NETVISOR_FLOW_WORKER_MODE must be one of: embedded, disabled, external.")
     if len(settings.SECRET_KEY or "") < 16:
         raise RuntimeError("NETVISOR_SECRET_KEY must be set to a strong value before startup.")
-    if not settings.AGENT_API_KEY:
-        raise RuntimeError("AGENT_API_KEY must be set before startup.")
-    if not settings.GATEWAY_API_KEY:
-        raise RuntimeError("GATEWAY_API_KEY must be set before startup.")
-
+    if len(settings.AGENT_MASTER_KEY or "") < 16:
+        raise RuntimeError("NETVISOR_AGENT_MASTER_KEY must be set to a strong value before startup.")
+    if len(settings.GATEWAY_MASTER_KEY or "") < 16:
+        raise RuntimeError("NETVISOR_GATEWAY_MASTER_KEY must be set to a strong value before startup.")
+    if len(settings.AGENT_API_KEY or "") < 16:
+        raise RuntimeError("AGENT_API_KEY must be set to a strong value before startup.")
+    if len(settings.GATEWAY_API_KEY or "") < 16:
+        raise RuntimeError("GATEWAY_API_KEY must be set to a strong value before startup.")
+    if settings.AGENT_API_KEY == settings.GATEWAY_API_KEY:
+        logger.warning("AGENT_API_KEY and GATEWAY_API_KEY are identical. Use distinct secrets for collection roles.")
+    if settings.AGENT_MASTER_KEY == settings.GATEWAY_MASTER_KEY:
+        logger.warning(
+            "NETVISOR_AGENT_MASTER_KEY and NETVISOR_GATEWAY_MASTER_KEY are identical. Use distinct signing roots."
+        )
+    
 # Socket.IO setup
-p_sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=_allowed_origins())
+p_sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=_allowed_origins(), cors_credentials=True)
 configure_socket_server(p_sio)
 
 from .services.flow_service import flow_service
@@ -67,7 +94,12 @@ async def lifespan(app: FastAPI):
         if startup_conn:
             startup_conn.close()
 
-    flow_writer_task = asyncio.create_task(flow_service.flow_writer_worker())
+    flow_writer_task = None
+    if str(settings.FLOW_WORKER_MODE or "embedded").lower() == "embedded":
+        flow_writer_task = asyncio.create_task(flow_service.flow_writer_worker())
+        logger.info("Embedded flow worker started.")
+    else:
+        logger.info("Embedded flow worker disabled (mode=%s).", settings.FLOW_WORKER_MODE)
     yield
     # Shutdown logic
     logger.info("NetVisor Backend Shutting Down...")
@@ -82,7 +114,8 @@ async def lifespan(app: FastAPI):
                 shutdown_conn.close()
 
     for task in (flow_writer_task,):
-        task.cancel()
+        if task:
+            task.cancel()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -90,6 +123,11 @@ app = FastAPI(
     lifespan=lifespan,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# Transport security middleware - enforces HTTPS for agent/gateway endpoints in production
+app.add_middleware(TransportSecurityMiddleware)
+app.add_middleware(CSRFProtectionMiddleware)
+app.add_middleware(RequestContextMiddleware)
 
 # CORS Middleware
 app.add_middleware(
@@ -118,8 +156,33 @@ async def ping():
 
 
 @p_sio.event
-async def connect(sid, environ):
-    logger.info("Socket connected: %s", sid)
+async def connect(sid, environ, auth=None):
+    try:
+        socket_context = await asyncio.to_thread(authenticate_socket_connection, environ)
+        await p_sio.save_session(
+            sid,
+            {
+                "user_id": socket_context.get("user_id"),
+                "organization_id": socket_context.get("organization_id"),
+                "role": socket_context.get("role"),
+            },
+        )
+        await p_sio.enter_room(sid, AUTHENTICATED_SOCKET_ROOM)
+        org_room = socket_room_for_organization(socket_context.get("organization_id"))
+        if org_room:
+            await p_sio.enter_room(sid, org_room)
+        logger.info(
+            "Socket connected: %s user=%s org=%s",
+            sid,
+            socket_context.get("user_id"),
+            socket_context.get("organization_id"),
+        )
+    except SocketAuthenticationError as exc:
+        logger.warning("Rejected socket connection %s: %s", sid, exc)
+        return False
+    except Exception as exc:
+        logger.error("Socket connection failed for %s: %s", sid, exc, exc_info=True)
+        return False
 
 
 @p_sio.event

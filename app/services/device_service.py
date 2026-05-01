@@ -3,6 +3,7 @@ from typing import List, Optional
 import logging
 
 from ..core.config import settings
+from ..db.session import require_runtime_schema
 from ..utils.network import is_rfc1918_device_ip, normalize_ip, normalize_mac
 from .managed_device_service import managed_device_service
 
@@ -50,52 +51,8 @@ class DeviceService:
     def ensure_schema(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        managed_device_service.ensure_table(db_conn)
-        cursor = db_conn.cursor()
-        try:
-            if not self._column_exists(cursor, "devices", "last_seen"):
-                cursor.execute(
-                    """
-                    ALTER TABLE devices
-                    ADD COLUMN last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
-                    """
-                )
-
-            if not self._column_exists(cursor, "devices", "first_seen"):
-                cursor.execute(
-                    """
-                    ALTER TABLE devices
-                    ADD COLUMN first_seen DATETIME DEFAULT CURRENT_TIMESTAMP
-                    """
-                )
-
-            if not self._index_exists(cursor, "devices", "idx_devices_org_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_devices_org_last_seen
-                    ON devices (organization_id, last_seen)
-                    """
-                )
-
-            cursor.execute(
-                """
-                CREATE TABLE IF NOT EXISTS device_ip_history (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    device_mac VARCHAR(20) NOT NULL,
-                    ip_address VARCHAR(50) NOT NULL,
-                    organization_id CHAR(36),
-                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY uq_device_ip_history (device_mac, ip_address, organization_id)
-                )
-                """
-            )
-
-            db_conn.commit()
-            self._schema_ready = True
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def get_devices(self, db_conn, organization_id: Optional[str] = None) -> List[dict]:
         self.ensure_schema(db_conn)
@@ -334,6 +291,8 @@ class DeviceService:
                 hostname=hostname_value,
                 ip=normalized_ip,
             )
+            is_new_device = existing is None
+            
             if existing:
                 existing_last_seen = self._parse_timestamp(existing.get("last_seen"))
                 merged_last_seen = seen_dt if not existing_last_seen else max(existing_last_seen, seen_dt)
@@ -376,48 +335,64 @@ class DeviceService:
                     organization_id=existing.get("organization_id") or organization_id,
                     seen_dt=merged_last_seen,
                 )
-                return True
+            else:
+                if not create_if_missing or not mac_value:
+                    return False
 
-            if not create_if_missing or not mac_value:
-                return False
-
-            cursor.execute(
-                """
-                INSERT INTO devices (
-                    ip,
-                    mac,
-                    hostname,
-                    vendor,
-                    device_type,
-                    os_family,
-                    is_online,
-                    organization_id,
-                    agent_id,
-                    first_seen,
-                    last_seen
+                cursor.execute(
+                    """
+                    INSERT INTO devices (
+                        ip,
+                        mac,
+                        hostname,
+                        vendor,
+                        device_type,
+                        os_family,
+                        is_online,
+                        organization_id,
+                        agent_id,
+                        first_seen,
+                        last_seen
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s)
+                    """,
+                    (
+                        normalized_ip,
+                        mac_value,
+                        hostname_value or "Unknown",
+                        vendor_value or "Unknown",
+                        device_type_value or "Unknown",
+                        os_family_value or "Unknown",
+                        organization_id,
+                        agent_id_value,
+                        seen_dt,
+                        seen_dt,
+                    ),
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s)
-                """,
-                (
-                    normalized_ip,
-                    mac_value,
-                    hostname_value or "Unknown",
-                    vendor_value or "Unknown",
-                    device_type_value or "Unknown",
-                    os_family_value or "Unknown",
-                    organization_id,
-                    agent_id_value,
-                    seen_dt,
-                    seen_dt,
-                ),
-            )
-            self._record_ip_history(
-                cursor,
-                mac=mac_value,
-                ip=normalized_ip,
-                organization_id=organization_id,
-                seen_dt=seen_dt,
-            )
+                self._record_ip_history(
+                    cursor,
+                    mac=mac_value,
+                    ip=normalized_ip,
+                    organization_id=organization_id,
+                    seen_dt=seen_dt,
+                )
+                
+                # Audit log for new device discovery
+                if organization_id:
+                    try:
+                        from ..services.audit_service import audit_service
+                        audit_service.log_agent_registration(
+                            organization_id=str(organization_id),
+                            username="system",  # Device discovery is system-generated
+                            agent_id=agent_id_value or "unknown",
+                            action="device_discovered",
+                            details=f"ip: {normalized_ip}; mac: {mac_value or 'unknown'}; hostname: {hostname_value or 'unknown'}"
+                        )
+                    except ImportError:
+                        pass
+                    except Exception as exc:
+                        logger.debug(f"Audit logging failed for device discovery: {exc}")
+            
             return True
         finally:
             cursor.close()

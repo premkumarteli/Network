@@ -28,3 +28,27 @@ async def get_dashboard_activity(
         return dashboard_service.get_recent_activity(conn, organization_id=org_id, limit=limit)
     finally:
         conn.close()
+@router.get("/traffic-history")
+async def get_traffic_history(
+    current_user: dict = Depends(require_org_admin),
+    hours: int = 24
+):
+    conn = get_db_connection()
+    try:
+        org_id = current_user.get("organization_id")
+        return dashboard_service.get_traffic_history(conn, hours=hours, organization_id=org_id)
+    finally:
+        conn.close()
+
+
+@router.get("/device-stats")
+async def get_device_stats(
+    current_user: dict = Depends(require_org_admin),
+    limit: int = 5
+):
+    conn = get_db_connection()
+    try:
+        org_id = current_user.get("organization_id")
+        return dashboard_service.get_device_activity_stats(conn, limit=limit, organization_id=org_id)
+    finally:
+        conn.close()

@@ -1,33 +1,106 @@
-version: "3.8"
+version: "3.9"
 
 services:
   db:
     image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
     environment:
       MYSQL_ROOT_PASSWORD: ${NETVISOR_DB_PASSWORD}
-      MYSQL_DATABASE: network_security
+      MYSQL_DATABASE: ${NETVISOR_DB_NAME:-network_security}
     volumes:
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - db_data:/var/lib/mysql
+      - ../database/init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
     ports:
       - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-p${NETVISOR_DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
-  backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+  migrate:
+    image: python:3.12-slim
+    working_dir: /srv/netvisor
+    env_file:
+      - ../.env
     environment:
-      - NETVISOR_DB_HOST=db
-      - NETVISOR_DB_PASSWORD=${NETVISOR_DB_PASSWORD}
+      PYTHONDONTWRITEBYTECODE: "1"
+      NETVISOR_DB_HOST: db
+    volumes:
+      - ../app:/srv/netvisor/app:ro
+      - ../shared:/srv/netvisor/shared:ro
+      - ../database:/srv/netvisor/database:ro
+      - ../run_server.py:/srv/netvisor/run_server.py:ro
+      - ../requirements-server.txt:/srv/netvisor/requirements.txt:ro
+    command: >
+      sh -c "
+      pip install --no-cache-dir -r requirements.txt &&
+      python database/migrations/apply_20260416_gateway_security_phase1.py &&
+      python database/migrations/apply_20260417_runtime_schema_phase2.py &&
+      python database/migrations/apply_20260418_flow_ingest_phase3.py &&
+      python database/migrations/apply_20260419_flow_ingest_hardening_phase4.py
+      "
+    depends_on:
+      db:
+        condition: service_healthy
+
+  server:
+    image: python:3.12-slim
+    working_dir: /srv/netvisor
+    env_file:
+      - ../.env
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      NETVISOR_DB_HOST: db
+      NETVISOR_FLOW_WORKER_MODE: "disabled"
+    volumes:
+      - ../app:/srv/netvisor/app:ro
+      - ../shared:/srv/netvisor/shared:ro
+      - ../database:/srv/netvisor/database:ro
+      - ../frontend/dist:/srv/netvisor/frontend/dist:ro
+      - ../run_server.py:/srv/netvisor/run_server.py:ro
+      - ../requirements-server.txt:/srv/netvisor/requirements.txt:ro
+      - server_runtime:/srv/netvisor/runtime
+    command: >
+      sh -c "
+      pip install --no-cache-dir -r requirements.txt &&
+      python run_server.py
+      "
     ports:
       - "8000:8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "3000:80"
+  flow_worker:
+    image: python:3.12-slim
+    working_dir: /srv/netvisor
+    env_file:
+      - ../.env
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      NETVISOR_DB_HOST: db
+      NETVISOR_FLOW_WORKER_MODE: "external"
+    volumes:
+      - ../app:/srv/netvisor/app:ro
+      - ../shared:/srv/netvisor/shared:ro
+      - ../database:/srv/netvisor/database:ro
+      - ../run_flow_worker.py:/srv/netvisor/run_flow_worker.py:ro
+      - ../requirements-server.txt:/srv/netvisor/requirements.txt:ro
+      - server_runtime:/srv/netvisor/runtime
+    command: >
+      sh -c "
+      pip install --no-cache-dir -r requirements.txt &&
+      python run_flow_worker.py
+      "
     depends_on:
-      - backend
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  db_data:
+  server_runtime:

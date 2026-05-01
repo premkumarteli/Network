@@ -10,7 +10,7 @@ def create_access_token(subject: Union[str, Any], expires_delta: timedelta = Non
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=60 * 24 * 8) # 8 days
+        expire = datetime.now(timezone.utc) + timedelta(minutes=max(int(settings.ACCESS_TOKEN_MINUTES or 30), 1))
     to_encode = {"exp": expire, "sub": str(subject)}
     if extra_claims:
         to_encode.update(extra_claims)

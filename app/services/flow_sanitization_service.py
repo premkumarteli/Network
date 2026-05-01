@@ -5,8 +5,11 @@ from datetime import datetime, timezone
 from hashlib import sha1
 from typing import Any, Optional
 
+import logging
+
 from ..utils.network import classify_ip_scope, is_unicast_mac, normalize_ip, normalize_mac
 
+logger = logging.getLogger("netvisor.services.flow_sanitization")
 
 @dataclass(frozen=True)
 class SanitizedFlow:
@@ -29,6 +32,11 @@ class SanitizedFlow:
     metadata_only: bool
     src_mac: Optional[str]
     dst_mac: Optional[str]
+    application_protocol: Optional[str]
+    service_name: Optional[str]
+    analysis_source: str
+    analysis_confidence: float
+    analysis_signals: tuple[str, ...]
     internal_device_ip: Optional[str]
     internal_device_mac: Optional[str]
     external_endpoint_ip: Optional[str]
@@ -77,6 +85,18 @@ class FlowSanitizationService:
             return None
         return host
 
+    def _normalize_signals(self, value: Any) -> tuple[str, ...]:
+        if not value:
+            return ()
+        if isinstance(value, str):
+            value = [value]
+        normalized: list[str] = []
+        for signal in value:
+            text = str(signal or "").strip()
+            if text and text not in normalized:
+                normalized.append(text)
+        return tuple(normalized)
+
     def _resolve_scope(self, src_scope: str, dst_scope: str) -> str:
         if src_scope == "internal" and dst_scope == "internal":
             return "internal_lan"
@@ -101,19 +121,30 @@ class FlowSanitizationService:
 
         packet_count = int(getattr(flow, "packet_count", 0) or 0)
         byte_count = int(getattr(flow, "byte_count", 0) or 0)
-        if packet_count <= 0 or byte_count < 0:
+        if byte_count < 0:
+            return None
+        if packet_count <= 0 and byte_count > 0:
+            packet_count = 1
+        if packet_count <= 0 and byte_count <= 0:
             return None
 
         start_time = self._parse_timestamp(getattr(flow, "start_time", None))
         last_seen = self._parse_timestamp(getattr(flow, "last_seen", None))
-        if not start_time or not last_seen:
-            return None
+        if not start_time and last_seen:
+            start_time = last_seen
+        elif not last_seen and start_time:
+            last_seen = start_time
+        elif not start_time and not last_seen:
+            now = datetime.now(timezone.utc)
+            start_time = now
+            last_seen = now
+            logger.debug("Missing timestamps on flow; defaulting to current time.")
         if last_seen < start_time:
             start_time = last_seen
 
         protocol = str(getattr(flow, "protocol", "") or "").upper().strip()
         if not protocol:
-            return None
+            protocol = "UNKNOWN"
 
         src_mac = normalize_mac(getattr(flow, "src_mac", None))
         dst_mac = normalize_mac(getattr(flow, "dst_mac", None))
@@ -160,6 +191,15 @@ class FlowSanitizationService:
             average_packet_size=average_packet_size,
             domain=self._normalize_host(getattr(flow, "domain", None)),
             sni=self._normalize_host(getattr(flow, "sni", None)),
+            application_protocol=str(getattr(flow, "application_protocol", "") or "").strip().upper() or None,
+            service_name=str(getattr(flow, "service_name", "") or "").strip() or None,
+            analysis_source=str(getattr(flow, "analysis_source", "transport_fallback") or "transport_fallback").strip()
+            or "transport_fallback",
+            analysis_confidence=max(
+                min(float(getattr(flow, "analysis_confidence", 0.0) or 0.0), 1.0),
+                0.0,
+            ),
+            analysis_signals=self._normalize_signals(getattr(flow, "analysis_signals", ())),
             agent_id=str(getattr(flow, "agent_id", "") or ""),
             source_type=str(getattr(flow, "source_type", "agent") or "agent"),
             metadata_only=bool(getattr(flow, "metadata_only", False)),

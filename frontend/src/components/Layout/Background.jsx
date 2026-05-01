@@ -1,7 +1,18 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const Background = () => {
   const canvasRef = useRef(null);
+  const [theme, setTheme] = useState(document.documentElement.getAttribute('data-theme') || 'dark');
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      setTheme(root.getAttribute('data-theme') || 'dark');
+    });
+
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -35,7 +46,9 @@ const Background = () => {
         if (this.y > height) this.reset();
       }
       draw() {
-        ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+        ctx.fillStyle = theme === 'light'
+          ? `rgba(81, 101, 124, ${Math.min(this.opacity, 0.28)})`
+          : `rgba(255, 255, 255, ${this.opacity})`;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
         ctx.fill();
@@ -52,7 +65,9 @@ const Background = () => {
         this.vx = (Math.random() - 0.5) * 2;
         this.vy = (Math.random() - 0.5) * 2;
         this.size = Math.random() * 2 + 1;
-        this.color = Math.random() < 0.5 ? "rgba(6, 182, 212, " : "rgba(139, 92, 246, ";
+        this.color = theme === 'light'
+          ? (Math.random() < 0.5 ? "rgba(15, 118, 110, " : "rgba(21, 94, 117, ")
+          : (Math.random() < 0.5 ? "rgba(6, 182, 212, " : "rgba(139, 92, 246, ");
         this.opacity = 0;
         this.life = 0;
         this.maxLife = Math.random() * 200 + 100;
@@ -109,14 +124,25 @@ const Background = () => {
       window.removeEventListener("resize", resize);
       cancelAnimationFrame(animationFrameId);
     };
-  }, []);
+  }, [theme]);
 
   return (
-    <div className="ambient-background" aria-hidden="true" style={{ position: 'fixed', inset: 0, zIndex: 0 }}>
+    <div
+      className="ambient-background"
+      aria-hidden="true"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 0,
+        background: theme === 'light'
+          ? 'linear-gradient(180deg, rgba(237, 243, 248, 0.92), rgba(247, 250, 252, 0.88))'
+          : undefined,
+      }}
+    >
       {/* Background Glows kept for depth */}
-      <div className="ambient-background__glow ambient-background__glow--cyan"></div>
-      <div className="ambient-background__glow ambient-background__glow--violet"></div>
-      <div className="ambient-background__glow ambient-background__glow--blue"></div>
+      <div className="ambient-background__glow ambient-background__glow--cyan" style={{ opacity: theme === 'light' ? 0.24 : undefined }}></div>
+      <div className="ambient-background__glow ambient-background__glow--violet" style={{ opacity: theme === 'light' ? 0.14 : undefined }}></div>
+      <div className="ambient-background__glow ambient-background__glow--blue" style={{ opacity: theme === 'light' ? 0.18 : undefined }}></div>
       
       <canvas 
         ref={canvasRef} 

@@ -38,3 +38,17 @@ def test_extract_flow_hints_prefers_tls_sni_when_available(monkeypatch):
     assert hints == {"domain": "github.com", "sni": "github.com"}
     assert extract_domain_hint(packet, cache) == "github.com"
 
+
+def test_extract_flow_hints_uses_http_host_header():
+    cache = DomainHintCache()
+    packet = (
+        IP(src="10.128.88.172", dst="93.184.216.34")
+        / TCP(sport=54001, dport=80)
+        / Raw(load=b"GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: netvisor\r\n\r\n")
+    )
+
+    hints = extract_flow_hints(packet, cache)
+
+    assert hints == {"domain": "example.com", "sni": None}
+    assert extract_domain_hint(packet, cache) == "example.com"
+

@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import logging
 
 from ..core.config import settings
+from ..db.session import require_runtime_schema
 from ..utils.asn_lookup import asn_lookup_service
+from ..utils.domain_intelligence import get_service_info
 from ..utils.domain_utils import get_base_domain, normalize_host
 from ..utils.network import is_rfc1918_device_ip, normalize_ip
 from .device_service import device_service
 
 logger = logging.getLogger("netvisor.apps")
+
+DEFAULT_APPLICATION_WINDOW_MINUTES = 24 * 60
+DEFAULT_ACTIVE_APPLICATION_WINDOW_SECONDS = 5 * 60
 
 # Specific applications must be checked before generic umbrella providers.
 APP_RULES: dict[str, list[str]] = {
@@ -21,11 +26,59 @@ APP_RULES: dict[str, list[str]] = {
     "ChatGPT": ["openai.com", "chatgpt.com"],
     "GitHub": ["github.com", "githubassets.com", "githubusercontent.com"],
     "Perplexity": ["perplexity.ai", "perplexity.com"],
-    "Microsoft": ["bing.com", "bingapis.com", "microsoft.com", "live.com", "gamepass.com", "xbox.com"],
+    "Microsoft": [
+        "bing.com",
+        "bingapis.com",
+        "microsoft.com",
+        "live.com",
+        "msn.com",
+        "msedge.net",
+        "office.com",
+        "office.net",
+        "outlook.com",
+        "sharepoint.com",
+        "microsoftonline.com",
+        "gamepass.com",
+        "xbox.com",
+    ],
     "Google": ["google.com", "googleapis.com", "gstatic.com", "googleusercontent.com"],
 }
 
 CONTROL_PORTS = {53, 67, 68, 123, 137, 138, 1900, 5353, 5355}
+TRANSPORT_PROTOCOL_LABELS = {
+    "dns": "DNS",
+    "dhcp": "DHCP",
+    "http": "HTTP",
+    "https": "HTTPS",
+    "tls": "TLS",
+    "quic": "QUIC",
+    "ntp": "NTP",
+    "ssdp": "SSDP",
+    "mdns": "mDNS",
+    "llmnr": "LLMNR",
+    "nbns": "NBNS",
+    "nbds": "NBDS",
+}
+CONTROL_TRANSPORT_LABELS = {"DNS", "DHCP", "NTP", "SSDP", "mDNS", "LLMNR", "NBNS", "NBDS"}
+GENERIC_TRANSPORT_APPLICATIONS = {
+    "ARP",
+    "DHCP",
+    "DNS",
+    "HTTP",
+    "HTTPS",
+    "ICMP",
+    "ICMPV6",
+    "LLMNR",
+    "mDNS",
+    "NBDS",
+    "NBNS",
+    "NTP",
+    "QUIC",
+    "SSDP",
+    "TCP",
+    "TLS",
+    "UDP",
+}
 SHARED_INFRA_BASE_DOMAINS = {
     "amazonaws.com",
     "awsstatic.com",
@@ -54,16 +107,125 @@ class ApplicationService:
     def get_base_domain(self, domain: object) -> Optional[str]:
         return get_base_domain(domain)
 
+    def _fallback_application_label(self, base_domain: str | None) -> str:
+        if not base_domain:
+            return "Other"
+
+        root_label = str(base_domain).split(".", 1)[0].replace("-", " ").replace("_", " ").strip()
+        if not root_label:
+            return "Other"
+
+        tokens = root_label.split()
+        if len(tokens) > 1 and len(tokens[0]) == 1 and tokens[0].isalpha():
+            tokens = tokens[1:]
+        normalized_root = " ".join(tokens) or root_label
+
+        if "msedge" in normalized_root:
+            return "Microsoft Edge"
+
+        words = []
+        for part in normalized_root.split():
+            if len(part) <= 3 and part.isalpha():
+                words.append(part.upper())
+            else:
+                words.append(part.capitalize())
+        return " ".join(words) or "Other"
+
     def _preferred_host(self, row: Any) -> Optional[str]:
         return self._normalize_domain(self._row_value(row, "sni") or self._row_value(row, "domain"))
+
+    def _preferred_external_ip(self, row: Any) -> Optional[str]:
+        for key in ("external_endpoint_ip", "external_ip", "dst_ip", "src_ip"):
+            candidate = normalize_ip(self._row_value(row, key))
+            if candidate and not is_rfc1918_device_ip(candidate):
+                return candidate
+
+        for key in ("external_endpoint_ip", "external_ip", "dst_ip", "src_ip"):
+            candidate = normalize_ip(self._row_value(row, key))
+            if candidate:
+                return candidate
+        return None
+
+    def _service_label_from_host(self, host: object) -> Optional[str]:
+        normalized = self._normalize_domain(host)
+        if not normalized:
+            return None
+
+        service_name, _ = get_service_info(normalized)
+        label = str(service_name or "").strip()
+        if not label:
+            return None
+
+        base_domain = self.get_base_domain(normalized)
+        lowered = label.lower()
+        if lowered in {normalized, (base_domain or "").lower()}:
+            return None
+        return label
+
+    def _transport_label(self, row: Any) -> Optional[str]:
+        application_protocol = str(self._row_value(row, "application_protocol") or "").strip().lower()
+        if application_protocol in TRANSPORT_PROTOCOL_LABELS:
+            return TRANSPORT_PROTOCOL_LABELS[application_protocol]
+
+        service_name = str(self._row_value(row, "service_name") or "").strip().lower()
+        if service_name in TRANSPORT_PROTOCOL_LABELS:
+            return TRANSPORT_PROTOCOL_LABELS[service_name]
+
+        protocol = str(self._row_value(row, "protocol") or "").strip().upper()
+        src_port = int(self._row_value(row, "src_port") or 0)
+        dst_port = int(self._row_value(row, "dst_port") or 0)
+        port = dst_port or src_port
+
+        if protocol == "UDP" and port == 443:
+            return "QUIC"
+
+        port_labels = {
+            53: "DNS",
+            67: "DHCP",
+            68: "DHCP",
+            80: "HTTP",
+            123: "NTP",
+            137: "NBNS",
+            138: "NBDS",
+            1900: "SSDP",
+            5353: "mDNS",
+            5355: "LLMNR",
+            443: "HTTPS" if protocol != "UDP" else "QUIC",
+            8443: "HTTPS" if protocol != "UDP" else "QUIC",
+            8000: "HTTP",
+            8008: "HTTP",
+            8080: "HTTP",
+            8888: "HTTP",
+        }
+        return port_labels.get(port)
+
+    def is_generic_transport_application(self, application: object) -> bool:
+        normalized = str(application or "").strip()
+        if not normalized:
+            return False
+        return normalized.upper() in {label.upper() for label in GENERIC_TRANSPORT_APPLICATIONS}
+
+    def resolve_application_label(self, row: Any) -> str:
+        """
+        Preserve a stored product label when we have one, but promote generic
+        transport buckets like HTTPS/DNS/QUIC whenever the row carries better
+        host or ASN context.
+        """
+        stored_application = str(self._row_value(row, "application") or "").strip()
+        if stored_application and stored_application not in UNCLASSIFIED_SENTINELS and not self.is_generic_transport_application(stored_application):
+            return stored_application
+
+        classified = self.classify_app(row)
+        if classified in UNCLASSIFIED_SENTINELS:
+            return stored_application or "Unknown"
+        return classified
 
     def classify_by_domain(self, domain: object) -> Optional[str]:
         """
         Classify using SNI/domain data.
-        Returns:
-        - concrete app name when matched
-        - dynamically title-cased name of the domain if no specific rule matches
-        - None when the host is missing/invalid or generic infrastructure should defer to ASN
+        Returns a concrete app name when matched, "Other" for known-but-uncategorized
+        hosts, and None when the host is missing/invalid or generic infrastructure
+        should defer to ASN resolution.
         """
         normalized = self._normalize_domain(domain)
         if not normalized:
@@ -73,19 +235,17 @@ class ApplicationService:
         if not base_domain:
             return None
 
-        if base_domain in SHARED_INFRA_BASE_DOMAINS:
-            return None
-
         for application, allowed_domains in APP_RULES.items():
             if base_domain in allowed_domains:
                 return application
-        
-        # Instead of grouping everything unknown as "Other", use the base domain name.
-        # Example: reddit.com -> Reddit
-        name = base_domain.split('.')[0]
-        if name:
-            return name.title()
-            
+
+        service_label = self._service_label_from_host(normalized)
+        if service_label:
+            return service_label
+
+        if base_domain in SHARED_INFRA_BASE_DOMAINS:
+            return None
+
         return "Other"
 
     def classify_by_asn(self, ip_value: str | None) -> Optional[str]:
@@ -97,7 +257,8 @@ class ApplicationService:
         1. SNI
         2. DNS/host domain
         3. ASN fallback
-        4. Unknown/Other separation
+        4. Transport/protocol hints
+        5. Unknown/Other separation
         """
         host = self._preferred_host(row)
         if host:
@@ -105,12 +266,24 @@ class ApplicationService:
             if domain_app and domain_app != "Other":
                 return domain_app
 
-        asn_app = self.classify_by_asn(self._row_value(row, "dst_ip"))
+        transport_app = self._transport_label(row)
+        asn_app = self.classify_by_asn(self._preferred_external_ip(row))
+
+        if host:
+            if asn_app:
+                return asn_app
+            if transport_app:
+                return transport_app
+            return "Other"
+
+        if transport_app in CONTROL_TRANSPORT_LABELS:
+            return transport_app
+
         if asn_app:
             return asn_app
 
-        if host:
-            return "Other"
+        if transport_app:
+            return transport_app
 
         debug_key = (
             str(self._row_value(row, "dst_ip") or self._row_value(row, "src_ip") or ""),
@@ -181,22 +354,34 @@ class ApplicationService:
             params: list = [window_minutes]
             query = """
                 SELECT
-                    device_ip,
-                    external_ip,
-                    application,
-                    domain,
-                    protocol,
-                    total_bytes,
-                    total_packets,
-                    first_seen,
-                    last_seen
-                FROM sessions
-                WHERE last_seen >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s MINUTE)
+                    s.device_ip,
+                    s.external_ip,
+                    s.application,
+                    s.domain,
+                    s.protocol,
+                    s.total_packets,
+                    s.total_bytes,
+                    s.first_seen,
+                    s.last_seen,
+                    COALESCE(flow_ports.src_port, 0) AS src_port,
+                    COALESCE(flow_ports.dst_port, 0) AS dst_port
+                FROM sessions s
+                LEFT JOIN (
+                    SELECT
+                        session_id,
+                        MAX(src_port) AS src_port,
+                        MAX(dst_port) AS dst_port
+                    FROM flow_logs
+                    WHERE session_id IS NOT NULL AND session_id != ''
+                    GROUP BY session_id
+                ) AS flow_ports
+                    ON flow_ports.session_id = s.session_id
+                WHERE s.last_seen >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s MINUTE)
             """
             if organization_id:
-                query += " AND organization_id = %s"
+                query += " AND s.organization_id = %s"
                 params.append(organization_id)
-            query += " ORDER BY last_seen DESC"
+            query += " ORDER BY s.last_seen DESC"
             cursor.execute(query, tuple(params))
             return cursor.fetchall()
         finally:
@@ -210,33 +395,35 @@ class ApplicationService:
         host = self._preferred_host(row)
         external_ip = normalize_ip(row.get("external_ip"))
         protocol = str(row.get("protocol") or "").upper()
+        transport_app = self._transport_label(row)
 
         if host and (host.endswith(".in-addr.arpa") or host.endswith(".ip6.arpa") or host.endswith(".local")):
             return False
 
         if not external_ip:
-            if not host:
+            if not host and not transport_app:
                 return False
-            if protocol == "UDP":
+            if protocol == "UDP" and not transport_app:
                 return False
-            if (row.get("application") or "Unknown") in {"Unknown", "Other"}:
+            if (row.get("application") or "Unknown") in {"Unknown", "Other"} and not transport_app and not host:
                 return False
 
         return True
 
     def _resolve_session_application(self, row: dict) -> str:
-        stored_application = row.get("application")
-        if stored_application not in UNCLASSIFIED_SENTINELS:
-            return stored_application
-
-        classified = self.classify_app(
+        return self.resolve_application_label(
             {
+                "src_ip": row.get("device_ip"),
+                "dst_ip": row.get("external_ip"),
                 "domain": row.get("domain"),
                 "sni": None,
-                "dst_ip": row.get("external_ip"),
+                "protocol": row.get("protocol"),
+                "src_port": row.get("src_port"),
+                "dst_port": row.get("dst_port"),
+                "external_endpoint_ip": row.get("external_ip"),
+                "application": row.get("application"),
             }
         )
-        return classified
 
     def _build_sessions(self, db_conn, organization_id: Optional[str], window_minutes: int) -> list[dict]:
         rows = self._fetch_recent_sessions(db_conn, organization_id, window_minutes)
@@ -252,6 +439,8 @@ class ApplicationService:
                     "device_ip": normalize_ip(row.get("device_ip")),
                     "application": self._resolve_session_application(row),
                     "domain": self.get_base_domain(host) if host else "-",
+                    "src_port": int(row.get("src_port") or 0),
+                    "dst_port": int(row.get("dst_port") or 0),
                     "bandwidth_bytes": int(row.get("total_bytes") or 0),
                     "first_seen": row.get("first_seen") or row.get("last_seen"),
                     "last_seen": row.get("last_seen"),
@@ -297,7 +486,7 @@ class ApplicationService:
             while True:
                 select_cursor.execute(
                     """
-                    SELECT id, dst_ip, domain, sni, application
+                    SELECT id, src_ip, dst_ip, src_port, dst_port, protocol, external_endpoint_ip, domain, sni, application
                     FROM flow_logs
                     WHERE id > %s
                       AND (application IS NULL OR application = '' OR application = 'Other' OR application = 'Unknown')
@@ -331,55 +520,8 @@ class ApplicationService:
     def ensure_schema(self, db_conn) -> None:
         if self._schema_ready:
             return
-
-        cursor = db_conn.cursor()
-        try:
-            if not self._column_exists(cursor, "flow_logs", "sni"):
-                logger.info("Adding sni column to flow_logs.")
-                cursor.execute(
-                    """
-                    ALTER TABLE flow_logs
-                    ADD COLUMN sni VARCHAR(255) NULL AFTER domain
-                    """
-                )
-
-            if not self._column_exists(cursor, "flow_logs", "application"):
-                logger.info("Adding application column to flow_logs.")
-                cursor.execute(
-                    """
-                    ALTER TABLE flow_logs
-                    ADD COLUMN application VARCHAR(50) NOT NULL DEFAULT 'Other' AFTER sni
-                    """
-                )
-
-            if not self._index_exists(cursor, "flow_logs", "idx_flow_logs_org_app_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_flow_logs_org_app_last_seen
-                    ON flow_logs (organization_id, application, last_seen)
-                    """
-                )
-
-            if not self._index_exists(cursor, "flow_logs", "idx_flow_logs_app_src_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_flow_logs_app_src_last_seen
-                    ON flow_logs (application, src_ip, last_seen)
-                    """
-                )
-
-            if not self._index_exists(cursor, "flow_logs", "idx_flow_logs_sni_last_seen"):
-                cursor.execute(
-                    """
-                    CREATE INDEX idx_flow_logs_sni_last_seen
-                    ON flow_logs (sni, last_seen)
-                    """
-                )
-
-            db_conn.commit()
-            self._schema_ready = True
-        finally:
-            cursor.close()
+        require_runtime_schema(db_conn)
+        self._schema_ready = True
 
     def _format_bytes(self, byte_count: float) -> str:
         if byte_count >= 1024 * 1024:
@@ -393,7 +535,29 @@ class ApplicationService:
             return value.strftime("%Y-%m-%d %H:%M:%S")
         return str(value or "")
 
+    def _coerce_utc_datetime(self, value):
+        if not value:
+            return None
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f"):
+                try:
+                    return datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+                except ValueError:
+                    continue
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except ValueError:
+                return None
+        if getattr(value, "tzinfo", None) is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
     def _runtime_seconds(self, first_seen, last_seen) -> int:
+        first_seen = self._coerce_utc_datetime(first_seen)
+        last_seen = self._coerce_utc_datetime(last_seen)
         if not last_seen and not first_seen:
             return 0
         if not first_seen:
@@ -420,37 +584,35 @@ class ApplicationService:
         self,
         db_conn,
         organization_id: Optional[str] = None,
-        window_minutes: int = 5,
-        active_window_seconds: int = 60,
+        window_minutes: int = DEFAULT_APPLICATION_WINDOW_MINUTES,
+        active_window_seconds: int = DEFAULT_ACTIVE_APPLICATION_WINDOW_SECONDS,
     ) -> list[dict]:
         self.ensure_schema(db_conn)
-        active_cutoff = datetime.utcnow() - timedelta(seconds=active_window_seconds)
+        active_cutoff = datetime.now(timezone.utc) - timedelta(seconds=active_window_seconds)
         grouped: dict[str, dict] = {}
         for session in self._build_sessions(db_conn, organization_id, window_minutes):
             application = session["application"]
             entry = grouped.get(application)
-            is_active = bool(session.get("last_seen") and session["last_seen"] >= active_cutoff)
+            first_seen = self._coerce_utc_datetime(session.get("first_seen"))
+            last_seen = self._coerce_utc_datetime(session.get("last_seen"))
+            is_active = bool(last_seen and last_seen >= active_cutoff)
             if entry is None:
                 grouped[application] = {
                     "application": application,
                     "device_ips": {session["device_ip"]},
                     "active_device_ips": {session["device_ip"]} if is_active else set(),
                     "bandwidth_bytes": session["bandwidth_bytes"],
-                    "runtime_seconds": self._runtime_seconds(
-                        session.get("first_seen"), session.get("last_seen")
-                    ),
-                    "last_seen": session["last_seen"],
+                    "runtime_seconds": self._runtime_seconds(first_seen, last_seen),
+                    "last_seen": last_seen,
                 }
             else:
                 entry["device_ips"].add(session["device_ip"])
                 if is_active:
                     entry["active_device_ips"].add(session["device_ip"])
                 entry["bandwidth_bytes"] += session["bandwidth_bytes"]
-                entry["runtime_seconds"] += self._runtime_seconds(
-                    session.get("first_seen"), session.get("last_seen")
-                )
-                if session["last_seen"] and session["last_seen"] > entry["last_seen"]:
-                    entry["last_seen"] = session["last_seen"]
+                entry["runtime_seconds"] += self._runtime_seconds(first_seen, last_seen)
+                if last_seen and (entry["last_seen"] is None or last_seen > entry["last_seen"]):
+                    entry["last_seen"] = last_seen
 
         results = []
         for entry in grouped.values():
@@ -469,6 +631,7 @@ class ApplicationService:
 
         results.sort(
             key=lambda item: (
+                1 if item["application"] in UNCLASSIFIED_SENTINELS or self.is_generic_transport_application(item["application"]) else 0,
                 -item["active_device_count"],
                 -item["device_count"],
                 -item["bandwidth_bytes"],
@@ -482,11 +645,11 @@ class ApplicationService:
         db_conn,
         app_name: str,
         organization_id: Optional[str] = None,
-        window_minutes: int = 5,
-        active_window_seconds: int = 60,
+        window_minutes: int = DEFAULT_APPLICATION_WINDOW_MINUTES,
+        active_window_seconds: int = DEFAULT_ACTIVE_APPLICATION_WINDOW_SECONDS,
     ) -> list[dict]:
         self.ensure_schema(db_conn)
-        active_cutoff = datetime.utcnow() - timedelta(seconds=active_window_seconds)
+        active_cutoff = datetime.now(timezone.utc) - timedelta(seconds=active_window_seconds)
         device_lookup = {
             device.get("ip"): device
             for device in device_service.get_devices(db_conn, organization_id=organization_id)
@@ -496,26 +659,61 @@ class ApplicationService:
             for session in self._build_sessions(db_conn, organization_id, window_minutes)
             if session["application"] == app_name
         ]
+        grouped: dict[str, dict] = {}
 
-        results = []
         for session in sessions:
-            device = device_lookup.get(session["device_ip"], {})
-            is_active = bool(session.get("last_seen") and session["last_seen"] >= active_cutoff)
-            results.append(
-                {
-                    "device_ip": session["device_ip"],
+            device_ip = session.get("device_ip")
+            if not device_ip:
+                continue
+
+            device = device_lookup.get(device_ip, {})
+            first_seen = self._coerce_utc_datetime(session.get("first_seen"))
+            last_seen = self._coerce_utc_datetime(session.get("last_seen"))
+            is_active = bool(last_seen and last_seen >= active_cutoff)
+            entry = grouped.get(device_ip)
+
+            if entry is None:
+                grouped[device_ip] = {
+                    "device_ip": device_ip,
                     "hostname": device.get("hostname") or "Unknown",
                     "status": "Active" if is_active else "Idle",
-                    "bandwidth_bytes": int(session["bandwidth_bytes"] or 0),
-                    "bandwidth": self._format_bytes(float(session["bandwidth_bytes"] or 0)),
-                    "runtime_seconds": self._runtime_seconds(
-                        session.get("first_seen"), session.get("last_seen")
-                    ),
-                    "runtime": self._format_runtime(
-                        self._runtime_seconds(session.get("first_seen"), session.get("last_seen"))
-                    ),
-                    "last_seen": self._format_timestamp(session["last_seen"]),
+                    "bandwidth_bytes": int(session.get("bandwidth_bytes") or 0),
+                    "first_seen": first_seen,
+                    "last_seen": last_seen,
+                    "session_count": 1,
+                    "active_session_count": 1 if is_active else 0,
                     "management_mode": device.get("management_mode") or "byod",
+                }
+                continue
+
+            entry["bandwidth_bytes"] += int(session.get("bandwidth_bytes") or 0)
+            entry["session_count"] += 1
+            if is_active:
+                entry["active_session_count"] += 1
+            if first_seen and (entry["first_seen"] is None or first_seen < entry["first_seen"]):
+                entry["first_seen"] = first_seen
+            if last_seen and (entry["last_seen"] is None or last_seen > entry["last_seen"]):
+                entry["last_seen"] = last_seen
+            entry["status"] = "Active" if entry["active_session_count"] > 0 else "Idle"
+
+        results = []
+        for entry in grouped.values():
+            first_seen = entry.get("first_seen")
+            last_seen = entry.get("last_seen") or first_seen
+            runtime_seconds = self._runtime_seconds(first_seen, last_seen)
+            results.append(
+                {
+                    "device_ip": entry["device_ip"],
+                    "hostname": entry["hostname"],
+                    "status": entry["status"],
+                    "bandwidth_bytes": int(entry["bandwidth_bytes"] or 0),
+                    "bandwidth": self._format_bytes(float(entry["bandwidth_bytes"] or 0)),
+                    "runtime_seconds": runtime_seconds,
+                    "runtime": self._format_runtime(runtime_seconds),
+                    "last_seen": self._format_timestamp(last_seen),
+                    "management_mode": entry["management_mode"],
+                    "session_count": int(entry.get("session_count") or 0),
+                    "active_session_count": int(entry.get("active_session_count") or 0),
                 }
             )
 

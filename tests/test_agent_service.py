@@ -85,3 +85,25 @@ def test_merge_device_rows_prefers_managed_endpoint_for_duplicate_ip():
     assert devices[0]["management_mode"] == "managed"
     assert devices[0]["hostname"] == "ADMIN-PC"
 
+
+def test_filter_placeholder_agents_hides_test_rows():
+    rows = [
+        {
+            "agent_id": "AGENT-D455C7A1",
+            "hostname": "DESKTOP-IFIA9GL",
+        },
+        {
+            "agent_id": "AGENT-TEST-01",
+            "hostname": "test",
+        },
+        {
+            "agent_id": "AGENT-DEMO-02",
+            "hostname": "DEMO",
+        },
+    ]
+
+    filtered = agent_service._filter_placeholder_agents(rows)
+
+    assert len(filtered) == 1
+    assert filtered[0]["agent_id"] == "AGENT-D455C7A1"
+

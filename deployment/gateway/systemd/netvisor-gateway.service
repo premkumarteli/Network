@@ -1,0 +1,21 @@
+[Unit]
+Description=NetVisor Metadata Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=netvisor-gateway
+Group=netvisor-gateway
+WorkingDirectory=/opt/netvisor/gateway
+EnvironmentFile=-/opt/netvisor/gateway/.env
+ExecStart=/usr/bin/env python3 /opt/netvisor/gateway/run_gateway.py
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

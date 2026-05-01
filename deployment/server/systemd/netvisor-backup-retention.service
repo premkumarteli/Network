@@ -1,0 +1,10 @@
+[Unit]
+Description=NetVisor Backup Retention Cleanup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/netvisor
+EnvironmentFile=-/opt/netvisor/.env
+ExecStart=/usr/bin/env python3 /opt/netvisor/run_backup_retention.py

@@ -69,3 +69,22 @@ def test_beaconing_detection_is_explicit():
     assert report is not None
     assert "Possible C2 Beaconing" in report["reasons"]
 
+
+def test_brute_force_detection_handles_timestamp_only_bucket_entries():
+    engine = RiskEngine()
+    report = None
+    for second in range(15):
+        report = engine.evaluate_flow(
+            make_flow(
+                dst_ip="10.0.0.20",
+                dst_port=22,
+                byte_count=120,
+                duration=0.2,
+                last_seen=f"2026-03-18 10:05:{second:02d}",
+            )
+        )
+
+    assert report is not None
+    assert "Potential Brute Force Attack" in report["reasons"]
+    assert report["severity"] in {"HIGH", "CRITICAL"}
+

@@ -20,3 +20,4 @@ def test_browser_launcher_creates_dedicated_profile_wrapper(monkeypatch, tmp_pat
     assert "--new-window" in wrapper_text
     assert "--user-data-dir=" in wrapper_text
     assert "--proxy-server=%NETVISOR_PROXY%" in wrapper_text
+    assert "--disable-quic" in wrapper_text

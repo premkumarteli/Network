@@ -1,5 +1,8 @@
+import os
+import time
 from pathlib import Path
 
+from app.db import session as db_session
 from app.services.system_service import SystemService
 
 
@@ -14,7 +17,19 @@ class FakeCursor:
     def execute(self, query, params=None):
         self.query = " ".join(query.strip().split())
         self.params = params or ()
-        if self.query.startswith("SHOW TABLES LIKE"):
+        if "FROM information_schema.tables" in self.query:
+            _, table_name = self.params
+            runtime_tables = set(db_session.REQUIRED_RUNTIME_TABLES) | set(self.tables.keys())
+            self.results = [{"count": 1 if table_name in runtime_tables else 0}]
+        elif "FROM information_schema.columns" in self.query:
+            _, table_name, column_name = self.params
+            required_columns = db_session.REQUIRED_RUNTIME_COLUMNS.get(table_name, set())
+            self.results = [{"count": 1 if column_name in required_columns else 0}]
+        elif "FROM information_schema.statistics" in self.query:
+            _, table_name, index_name = self.params
+            required_indexes = db_session.REQUIRED_RUNTIME_INDEXES.get(table_name, set())
+            self.results = [{"count": 1 if index_name in required_indexes else 0}]
+        elif self.query.startswith("SHOW TABLES LIKE"):
             table_name = self.params[0]
             self.results = [{"table": table_name}] if table_name in self.tables else []
         elif self.query.startswith("SELECT COUNT(*) AS count FROM"):
@@ -129,4 +144,27 @@ def test_clear_runtime_data_keeps_persistent_inspection_policy_rows(tmp_path):
 
     assert tables["web_events"] == []
     assert tables["inspection_policies"] == [{"agent_id": "AGENT-1", "device_ip": "10.0.0.5"}]
+
+
+def test_cleanup_old_backups_prunes_expired_directories(tmp_path):
+    backup_root = Path(tmp_path)
+    service = SystemService(backup_root=backup_root)
+
+    expired = backup_root / "20240101_010101_expired"
+    recent = backup_root / "20241231_235959_recent"
+    expired.mkdir(parents=True, exist_ok=True)
+    recent.mkdir(parents=True, exist_ok=True)
+
+    now = time.time()
+    os.utime(expired, (now - 10 * 24 * 60 * 60, now - 10 * 24 * 60 * 60))
+    os.utime(recent, (now - 1 * 24 * 60 * 60, now - 1 * 24 * 60 * 60))
+
+    result = service.cleanup_old_backups(retention_days=7)
+
+    assert result["configured"] is True
+    assert result["retention_days"] == 7
+    assert result["deleted_count"] == 1
+    assert str(expired) in result["deleted_dirs"]
+    assert not expired.exists()
+    assert recent.exists()
 

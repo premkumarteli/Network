@@ -1,41 +1,45 @@
-import { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "../../hooks/useAuth";
-import { useVisibilityPolling } from "../../hooks/useVisibilityPolling";
-import { systemService } from "../../services/api";
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../hooks/useAuth';
+import { useVisibilityPolling } from '../../hooks/useVisibilityPolling';
+import { systemService } from '../../services/api';
+import Breadcrumbs from './Breadcrumbs';
+import GlobalSearch from './GlobalSearch';
+import StatusBadge from '../V2/StatusBadge';
 
-const Header = () => {
+const routeMeta = [
+  { match: (path) => path === '/dashboard' || path === '/', title: 'Operational Overview', subtitle: 'Real-time posture and triage' },
+  { match: (path) => path === '/devices', title: 'Device Inventory', subtitle: 'Managed and observed assets' },
+  { match: (path) => path.startsWith('/apps'), title: 'Application Coverage', subtitle: 'Traffic grouped by product usage' },
+  { match: (path) => path === '/threats', title: 'Threat Investigation', subtitle: 'Active high-risk detections' },
+  { match: (path) => path === '/activity', title: 'Traffic Activity', subtitle: 'Live session visibility' },
+  { match: (path) => path === '/logs', title: 'Flow Logs', subtitle: 'Search and export flow records' },
+  { match: (path) => path === '/agents' || path.startsWith('/agents/'), title: 'Fleet Operations', subtitle: 'Agent health and device coverage' },
+  { match: (path) => path === '/vpn', title: 'VPN Risk Feed', subtitle: 'Tunnel and proxy detections' },
+  { match: (path) => path === '/settings', title: 'System Controls', subtitle: 'Runtime and maintenance controls' },
+  { match: (path) => path === '/dpi', title: 'Web Inspection', subtitle: 'Global browser visibility' },
+  { match: (path) => path === '/user', title: 'My Security Workspace', subtitle: 'Account posture and linked telemetry' },
+  { match: (path) => path.startsWith('/user/'), title: 'Device Workspace', subtitle: 'Evidence-first device investigation' },
+];
+
+const Header = ({ onToggleAlerts, onToggleNav }) => {
   const { user, isAdmin, logout } = useAuth();
   const [systemHealth, setSystemHealth] = useState({
-    status: "Operational",
-    cpu: 0,
-    session: "Active",
+    status: 'Operational',
   });
   const [menuOpen, setMenuOpen] = useState(false);
-  const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+  const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const menuRef = useRef(null);
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Mapping routes to titles
-    const getTitle = () => {
-      const path = location.pathname;
-      if (path === "/") return "Dashboard";
-      if (path === "/devices") return "Devices";
-      if (path === "/apps" || path.startsWith("/apps/")) return "Applications";
-      if (path === "/threats") return "Threats";
-      if (path === "/activity") return "Live Traffic";
-      if (path === "/logs") return "Agent Monitoring";
-      if (path.startsWith("/agents/")) return "Agent Details";
-    if (path === "/vpn") return "VPN & Threats";
-      if (path === "/settings") return "Settings";
-    if (path === "/user") return "My Security";
-    if (path.startsWith("/user/")) return "Device Workspace";
-    return "NetVisor";
-  };
+  const activeRoute = useMemo(
+    () => routeMeta.find((entry) => entry.match(location.pathname)) || { title: 'NetVisor', subtitle: 'Security workspace' },
+    [location.pathname],
+  );
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
+    document.documentElement.setAttribute('data-theme', theme);
   }, [theme]);
 
   useEffect(() => {
@@ -44,225 +48,108 @@ const Header = () => {
         setMenuOpen(false);
       }
     };
-    document.addEventListener("mousedown", handleClickOutside);
 
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  useEffect(() => {
-    const fetchHealth = async () => {
-      try {
-        const res = await systemService.getHealth();
-        setSystemHealth({
-          status: res.data.status === "healthy" ? "Operational" : "Degraded",
-          cpu: 0,
-          session: "Active",
-        });
-      } catch {
-        setSystemHealth((prev) => ({
-          ...prev,
-          status: "Degraded",
-        }));
-      }
-    };
+  const fetchHealth = async () => {
+    try {
+      const res = await systemService.getHealth();
+      setSystemHealth({
+        status: res.data?.status === 'healthy' ? 'Operational' : 'Degraded',
+      });
+    } catch {
+      setSystemHealth({
+        status: 'Degraded',
+      });
+    }
+  };
 
+  useEffect(() => {
     fetchHealth();
   }, []);
 
-  useVisibilityPolling(
-    async () => {
-      try {
-        const res = await systemService.getHealth();
-        setSystemHealth({
-          status: res.data.status === "healthy" ? "Operational" : "Degraded",
-          cpu: 0,
-          session: "Active",
-        });
-      } catch {
-        setSystemHealth((prev) => ({
-          ...prev,
-          status: "Degraded",
-        }));
-      }
-    },
-    30000
-  );
+  useVisibilityPolling(fetchHealth, 30000);
 
   const toggleTheme = () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
-    setTheme(newTheme);
-    localStorage.setItem("theme", newTheme);
-    document.documentElement.setAttribute("data-theme", newTheme);
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('theme', nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
   const handleLogout = async () => {
     await logout();
-    navigate("/login");
+    navigate('/login');
   };
 
-  const getStatusColor = (status) => {
-    if (status === "Operational") return "var(--success)";
-    if (status === "High Load") return "#f59e0b";
-    return "var(--danger)";
-  };
-
-  const displayUser = user || { username: "Guest", role: "viewer" };
+  const displayUser = user || { username: 'Guest', role: 'viewer' };
 
   return (
-    <div className="header">
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
-        <h2 style={{ margin: 0 }}>{getTitle()}</h2>
-        <div
-          className="status-badge"
-          style={{
-            background: "rgba(6, 182, 212, 0.1)",
-            color: "var(--primary)",
-            border: "1px solid rgba(6, 182, 212, 0.2)",
-            fontSize: "0.7rem",
-          }}
-        >
-          <span className="terminal-cursor">SYS_MONITORING: ACTIVE</span>
+    <header className="nv-topbar">
+      <div className="nv-topbar__cluster">
+        <button type="button" className="nv-button nv-button--secondary" onClick={onToggleNav}>
+          <i className="ri-menu-line"></i>
+        </button>
+        <div className="nv-topbar__title">
+          <Breadcrumbs />
+          <strong>{activeRoute.title}</strong>
+          <span>{activeRoute.subtitle}</span>
         </div>
       </div>
 
-      <div style={{ position: "relative" }} ref={menuRef}>
-        <div
-          onClick={() => setMenuOpen(!menuOpen)}
-          style={{
-            display: "flex",
-            gap: "1rem",
-            alignItems: "center",
-            cursor: "pointer",
-            userSelect: "none",
-          }}
-        >
-          <button
-            className="action-btn"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleTheme();
-            }}
-            title="Toggle Theme"
-            style={{ marginRight: "0.5rem" }}
-          >
-            <i
-              className={theme === "light" ? "ri-moon-line" : "ri-sun-line"}
-            ></i>
+      <GlobalSearch />
+
+      <div className="nv-topbar__cluster">
+        <StatusBadge tone={systemHealth.status === 'Operational' ? 'success' : 'warning'} icon="ri-pulse-line">
+          {systemHealth.status}
+        </StatusBadge>
+        <button type="button" className="nv-button nv-button--secondary" onClick={onToggleAlerts} title="Threat feed">
+          <i className="ri-notification-3-line"></i>
+        </button>
+        <button type="button" className="nv-button nv-button--secondary" onClick={toggleTheme} title="Toggle theme">
+          <i className={theme === 'light' ? 'ri-moon-line' : 'ri-sun-line'}></i>
+        </button>
+
+        <div style={{ position: 'relative' }} ref={menuRef}>
+          <button type="button" className="nv-user-pill" onClick={() => setMenuOpen((current) => !current)}>
+            <div className="nv-user-pill__avatar">{displayUser.username?.[0]?.toUpperCase() || 'U'}</div>
+            <div className="nv-topbar__title" style={{ gap: '0.1rem', textAlign: 'left' }}>
+              <strong>{displayUser.username}</strong>
+              <span>{displayUser.role}</span>
+            </div>
+            <i className={`ri-arrow-down-s-line ${menuOpen ? 'rotate-180' : ''}`}></i>
           </button>
 
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontWeight: 700, color: "var(--primary)" }}>
-              {displayUser.username}
-            </div>
-            <div style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
-              {displayUser.role}
-            </div>
-          </div>
-
-          <div
-            onClick={() => navigate("/user")}
-            style={{
-              width: "40px",
-              height: "40px",
-              background: "var(--primary)",
-              borderRadius: "50%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "black",
-              fontWeight: "bold",
-            }}
-          >
-            {displayUser.username[0].toUpperCase()}
-          </div>
-
-          <i
-            className={`ri-arrow-down-s-line ${menuOpen ? "rotate-180" : ""}`}
-            style={{ transition: "transform 0.3s" }}
-          ></i>
-        </div>
-
-        {/* Dropdown Menu */}
-        <div className={`dropdown-menu ${menuOpen ? "active" : ""}`}>
-          <div className="dropdown-header">
-            <span
-              style={{
-                fontSize: "0.8rem",
-                color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "1px",
-              }}
-            >
-              Session Info
-            </span>
-          </div>
-
-          <div className="dropdown-item link" onClick={() => navigate("/user")}>
-            <i className="ri-shield-user-line"></i>
-            <div>
-              <strong>Role:</strong> {displayUser.role}
-            </div>
-          </div>
-
-          <div className="dropdown-item">
-            <i
-              className="ri-checkbox-circle-fill"
-              style={{ color: getStatusColor(systemHealth.status) }}
-            ></i>
-            <div>
-              <strong>System:</strong>{" "}
-              <span style={{ color: getStatusColor(systemHealth.status) }}>
-                {systemHealth.status} (CPU: {systemHealth.cpu}%)
-              </span>
-            </div>
-          </div>
-
-          <div className="dropdown-item">
-            <i className="ri-map-pin-line"></i>
-            <div>
-              <strong>IP:</strong> {window.location.hostname}
-            </div>
-          </div>
-
-          <div className="dropdown-item">
-            <i className="ri-time-line"></i>
-            <div>
-              <strong>Session:</strong>{" "}
-              <span style={{ color: "var(--success)" }}>
-                {systemHealth.session}
-              </span>
-            </div>
-          </div>
-
-          <div
-            style={{
-              borderTop: "1px solid var(--glass-border)",
-              margin: "0.5rem 0",
-            }}
-          ></div>
-
-          {isAdmin ? (
-            <div
-              className="dropdown-item link"
-              onClick={() => navigate("/settings")}
-              style={{ cursor: "pointer" }}
-            >
-              <i className="ri-settings-4-line"></i> Settings
+          {menuOpen ? (
+            <div className="nv-menu">
+              <div className="nv-menu__section">
+                <div className="nv-menu__label">Session</div>
+              </div>
+              <button type="button" className="nv-menu__item" onClick={() => navigate('/user')}>
+                <i className="ri-shield-user-line"></i>
+                <span>Open personal workspace</span>
+              </button>
+              {isAdmin ? (
+                <button type="button" className="nv-menu__item" onClick={() => navigate('/settings')}>
+                  <i className="ri-settings-4-line"></i>
+                  <span>Open system settings</span>
+                </button>
+              ) : null}
+              <div className="nv-menu__section">
+                <div className="nv-menu__label">Connection</div>
+                <p>{window.location.hostname}</p>
+              </div>
+              <button type="button" className="nv-menu__item" onClick={handleLogout}>
+                <i className="ri-logout-box-r-line"></i>
+                <span>Logout</span>
+              </button>
             </div>
           ) : null}
-
-          <div
-            className="dropdown-item link"
-            onClick={handleLogout}
-            style={{ color: "var(--danger)", cursor: "pointer" }}
-          >
-            <i className="ri-logout-box-r-line"></i> Logout
-          </div>
         </div>
       </div>
-    </div>
+    </header>
   );
 };
 

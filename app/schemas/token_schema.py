@@ -9,3 +9,16 @@ class TokenPayload(BaseModel):
     sub: Optional[str] = None
     role: Optional[str] = None
     organization_id: Optional[str] = None
+
+
+class AuthSession(BaseModel):
+    authenticated: bool = True
+    id: str
+    username: str
+    email: Optional[str] = None
+    role: str = "viewer"
+    organization_id: Optional[str] = None
+
+
+class LogoutResponse(BaseModel):
+    status: str = "ok"

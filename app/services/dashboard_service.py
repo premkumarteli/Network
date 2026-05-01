@@ -1,5 +1,6 @@
 from typing import Optional
 
+from .application_service import application_service
 from .device_service import device_service
 
 
@@ -97,7 +98,68 @@ class DashboardService:
                 "bandwidth": self._format_bytes(bandwidth_bytes / 60) + "/s",
                 "bandwidth_value": bandwidth_mbps,
                 "risk_distribution": risk_distribution,
+                "threat_summary": {
+                    "total": sum(risk_distribution.values()),
+                    "high_critical": int(high_risk_row.get("high_risk") or 0)
+                }
             }
+        finally:
+            cursor.close()
+
+    def get_traffic_history(self, db_conn, hours: int = 24, organization_id: Optional[str] = None) -> list[dict]:
+        cursor = db_conn.cursor(dictionary=True)
+        try:
+            params = []
+            org_filter = ""
+            if organization_id:
+                org_filter = "organization_id = %s AND "
+                params.append(organization_id)
+            
+            params.append(hours)
+            
+            cursor.execute(
+                f"""
+                SELECT 
+                    DATE_FORMAT(last_seen, '%Y-%m-%d %H:00:00') as hour,
+                    COUNT(*) as flow_count,
+                    COALESCE(SUM(byte_count), 0) as byte_count
+                FROM flow_logs
+                WHERE {org_filter}last_seen >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s HOUR)
+                GROUP BY hour
+                ORDER BY hour ASC
+                """,
+                tuple(params)
+            )
+            return cursor.fetchall()
+        finally:
+            cursor.close()
+
+    def get_device_activity_stats(self, db_conn, limit: int = 5, organization_id: Optional[str] = None) -> list[dict]:
+        cursor = db_conn.cursor(dictionary=True)
+        try:
+            params = []
+            org_filter = ""
+            if organization_id:
+                org_filter = "WHERE organization_id = %s"
+                params.append(organization_id)
+            
+            params.append(limit)
+            
+            cursor.execute(
+                f"""
+                SELECT 
+                    src_ip, 
+                    COUNT(*) as flow_count,
+                    COALESCE(SUM(byte_count), 0) as byte_count
+                FROM flow_logs
+                {org_filter}
+                GROUP BY src_ip
+                ORDER BY flow_count DESC
+                LIMIT %s
+                """,
+                tuple(params)
+            )
+            return cursor.fetchall()
         finally:
             cursor.close()
 
@@ -115,6 +177,10 @@ class DashboardService:
                     f.last_seen,
                     f.src_ip,
                     f.dst_ip,
+                    f.src_port,
+                    f.dst_port,
+                    f.external_endpoint_ip,
+                    f.sni,
                     f.domain,
                     COALESCE(NULLIF(f.application, ''), 'Other') AS application,
                     f.protocol,
@@ -141,15 +207,22 @@ class DashboardService:
             activity = []
             for row in cursor.fetchall():
                 timestamp = self._format_timestamp(row.get("last_seen"))
+                host = row.get("sni") or row.get("domain")
+                application = application_service.resolve_application_label(row)
                 activity.append(
                     {
                         "timestamp": timestamp,
                         "time": timestamp.split(" ")[-1] if timestamp else "",
                         "src_ip": row.get("src_ip"),
                         "dst_ip": row.get("dst_ip"),
-                        "domain": row.get("domain") or "-",
-                        "application": row.get("application") or "Other",
+                        "src_port": row.get("src_port"),
+                        "dst_port": row.get("dst_port"),
+                        "domain": host or "-",
+                        "host": host or "-",
+                        "external_endpoint_ip": row.get("external_endpoint_ip"),
+                        "application": application or "Other",
                         "protocol": row.get("protocol") or "UNKNOWN",
+                        "byte_count": float(row.get("byte_count") or 0),
                         "size": self._format_bytes(float(row.get("byte_count") or 0)),
                         "severity": row.get("severity") or "LOW",
                         "management_mode": row.get("management_mode") or "byod",
