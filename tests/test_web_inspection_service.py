@@ -308,10 +308,11 @@ def test_grouped_evidence_rolls_up_tabs_and_normalizes_risk(monkeypatch):
     )
 
     assert len(groups) == 2
-    first = groups[0]
-    second = groups[1]
+    grouped = {group["group_key"]: group for group in groups}
 
-    assert first["group_key"] == "10.0.0.5|google chrome|chrome.exe|https://example.com/tab-1"
+    first = grouped["10.0.0.5|google chrome|chrome.exe|https://example.com/tab-1"]
+    second = grouped["10.0.0.5|google chrome|chrome.exe|https://example.com/tab-2"]
+
     assert first["event_count"] == 3
     assert first["request_bytes"] == 150
     assert first["response_bytes"] == 225

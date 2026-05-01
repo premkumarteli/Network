@@ -15,7 +15,7 @@ jobs:
       - name: Check repository hygiene
         shell: bash
         run: |
-          forbidden="$(git ls-files | grep -E '(^legacy/|^frontend/node_modules/|^frontend/dist/|^build/|(^|/)(all_project_code\.txt|build_all_code\.py|current_env\.txt|agent_id\.txt|gateway_id\.txt|device_inventory\.json)$|(^|/)(server\.(stdout|stderr)\.log|tmp_server_.*\.log)$|^\.pytest_tmp(/|$)|^\.pytest_tmp_.*/)' || true)"
+          forbidden="$(git ls-files | grep -E '(^legacy/|^frontend/node_modules/|^frontend/dist/|^share_agent(/|$)|^share_agent\.zip$|(^|/)__pycache__/|\.pyc$|\.pyo$|^build/|(^|/)(all_project_code\.txt|build_all_code\.py|current_env\.txt|agent_id\.txt|gateway_id\.txt|device_inventory\.json)$|(^|/)(server\.(stdout|stderr)\.log|tmp_server_.*\.log)$|^\.pytest_tmp(/|$)|^\.pytest_tmp_.*/' || true)"
           if [ -n "$forbidden" ]; then
             echo "Forbidden tracked files found:"
             echo "$forbidden"

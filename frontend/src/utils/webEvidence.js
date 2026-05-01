@@ -36,7 +36,7 @@ const extractHost = (value) => {
   }
   try {
     return new URL(text).hostname || '';
-  } catch (error) {
+  } catch {
     return text;
   }
 };

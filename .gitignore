@@ -13,6 +13,8 @@ venv/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+share_agent/
+share_agent.zip
 runtime/
 data/models/
 data/backups/

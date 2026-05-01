@@ -687,63 +687,30 @@ const DeviceWorkspace = ({ deviceIp }) => {
             </div>
           ) : null}
 
-          {webActivity.length === 0 ? (
-            <DpiSetupGuide deviceIp={profile.device_ip} inspectionStatus={inspectionStatus} />
-          ) : null}
+           {webActivity.length === 0 && webEvidenceGroups.length === 0 ? (
+             <DpiSetupGuide deviceIp={profile.device_ip} inspectionStatus={inspectionStatus} />
+           ) : null}
         </SectionCard>
       ) : null}
-
-      <SidePanel
+      <WebEvidenceDrawer
         open={Boolean(selectedWebEvent)}
-        title={selectedWebEvent?.page_title || selectedWebEvent?.base_domain || 'Evidence'}
-        description="Redacted summary only. No full payload bodies are stored."
+        item={selectedWebEvent}
         onClose={() => setSelectedWebEvent(null)}
-        footer={selectedWebEvent ? (
-          <StatusBadge tone={getRiskTone(selectedWebEvent.risk_level)}>
-            {selectedWebEvent.risk_level || 'safe'} · {formatConfidence(selectedWebEvent.confidence_score)}
-          </StatusBadge>
-        ) : null}
-      >
-        {selectedWebEvent ? (
-          <div className="nv-evidence-grid">
-            <div className="nv-summary-strip" style={{ gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-              <div className="nv-summary-tile">
-                <span>Browser</span>
-                <strong>{formatBrowserLabel(selectedWebEvent.browser_name, selectedWebEvent.process_name)}</strong>
-                <p>{selectedWebEvent.base_domain || '-'}</p>
-              </div>
-              <div className="nv-summary-tile">
-                <span>Last Seen</span>
-                <strong>{formatUtcTimestampToLocal(selectedWebEvent.last_seen)}</strong>
-                <p>First seen {formatUtcTimestampToLocal(selectedWebEvent.first_seen)}</p>
-              </div>
-              <div className="nv-summary-tile">
-                <span>Content</span>
-                <strong>{selectedWebEvent.content_id || selectedWebEvent.content_category || 'web'}</strong>
-                <p>{selectedWebEvent.content_type || 'text/html'}</p>
-              </div>
-              <div className="nv-summary-tile">
-                <span>Traffic</span>
-                <strong>{selectedWebEvent.response_bytes_formatted || formatByteCount(selectedWebEvent.response_bytes)}</strong>
-                <p>{selectedWebEvent.http_method || 'GET'} · {selectedWebEvent.status_code || 'n/a'} · {selectedWebEvent.event_count || 1} event(s)</p>
-              </div>
-            </div>
-            <SectionCard title="URL" caption="Observed Location">
-              <code className="nv-code-block">{selectedWebEvent.page_url || 'No URL captured'}</code>
-            </SectionCard>
-            <SectionCard title="Redacted Snippet" caption="Evidence">
-              <pre className="nv-code-block">{selectedWebEvent.snippet_redacted || 'No textual snippet captured for this event.'}</pre>
-            </SectionCard>
-            {selectedWebEvent.threat_msg ? (
-              <SectionCard title="Threat Note" caption="Detection Context">
-                <p>{selectedWebEvent.threat_msg}</p>
-              </SectionCard>
-            ) : null}
+        footer={selectedWebEvent?.device_ip ? (
+          <div className="nv-inline-actions">
+            <button
+              type="button"
+              className="nv-button nv-button--secondary"
+              onClick={() => navigate(`/user/${encodeURIComponent(selectedWebEvent.device_ip)}/web-activity`)}
+            >
+              Open Deep Dive
+            </button>
           </div>
         ) : null}
-      </SidePanel>
+      />
     </div>
   );
 };
 
 export default UserPage;
+

@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { systemService } from '../services/api';
 import { useWebSocket } from '../hooks/useWebSocket';
 import PageHeader from '../components/V2/PageHeader';
@@ -16,6 +16,7 @@ import { getWebEvidencePrimaryLabel, getWebEvidenceScopeLabel, normalizeWebRiskL
 const DpiActivityPage = () => {
   const { deviceIp } = useParams();
   const decodedIp = decodeURIComponent(deviceIp);
+  const navigate = useNavigate();
   const [events, setEvents] = useState([]);
   const [evidenceGroups, setEvidenceGroups] = useState([]);
   const [loading, setLoading] = useState(true);
