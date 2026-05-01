@@ -9,6 +9,9 @@ NetVisor deploys as three runtimes:
 This folder contains role-specific manifests so each runtime can be copied to a
 different machine without guessing which files belong together.
 
+For local development, use the canonical root `.env.example` at the repository
+root and create `.env` with `python scripts/init_env.py`.
+
 Bundle builder:
 
 - `python scripts/build_deploy_bundles.py`

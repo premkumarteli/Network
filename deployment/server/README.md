@@ -6,6 +6,7 @@ Preferred packaging flow:
 - deploy the generated `build/deploy/server/` folder as the server runtime root
 - copy `.env.example` to `.env` in the bundle root and set the production values
 - run `docker compose up -d` from the bundle root
+- the repository root `.env.example` is the canonical local-development template; use `python scripts/init_env.py` in the repo root when working locally
 
 The generated bundle contains:
 

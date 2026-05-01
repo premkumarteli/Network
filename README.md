@@ -17,11 +17,12 @@ Generated output lives outside the source tree:
 
 ## Quick Start
 
-1. Copy `.env.example` to `.env` and set the database, secret, and bootstrap keys.
-2. Initialize the database with `mysql -u root -p < database\init.sql`.
-3. Start the backend with `python run_server.py`.
-4. Start the agent with `python run_agent.py`.
-5. Start the gateway with `python run_gateway.py`.
+1. Run `python scripts/init_env.py` to create a local `.env` from the tracked template.
+2. Edit `.env` with the database, secret, and bootstrap keys.
+3. Initialize the database with `mysql -u root -p < database\init.sql`.
+4. Start the backend with `python run_server.py`.
+5. Start the agent with `python run_agent.py`.
+6. Start the gateway with `python run_gateway.py`.
 
 ## Useful Commands
 
@@ -41,6 +42,7 @@ npm run build
 ## Docs
 
 - [Quick Start](docs/quickstart.md)
+- [Environment Setup](docs/env-setup.md)
 - [Agent/Gateway Flow](docs/agent-gateway-flow.md)
 - [Runbook](docs/runbook.md)
 - [Architecture Spec](docs/architecture-spec.md)

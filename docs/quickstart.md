@@ -4,7 +4,13 @@ This is the shortest path to a working local NetVisor stack.
 
 ## 1. Configure
 
-Copy `.env.example` to `.env` and set at least:
+Create a local `.env` from the tracked template:
+
+```powershell
+python scripts/init_env.py
+```
+
+Then set at least:
 
 - `NETVISOR_SECRET_KEY`
 - `NETVISOR_AGENT_MASTER_KEY`
