@@ -315,6 +315,19 @@ export const systemService = {
 export const agentService = {
   getAgents: () => api.get("/agents/"),
   getAgentDetails: (agentId) => api.get(`/agents/${encodeURIComponent(agentId)}`),
+  getEnrollmentRequests: () => api.get("/agents/enrollment-requests"),
+  approveEnrollmentRequest: (requestId, reviewReason) =>
+    api.post(`/agents/enrollment-requests/${encodeURIComponent(requestId)}/approve`, {
+      review_reason: reviewReason,
+    }),
+  rejectEnrollmentRequest: (requestId, reviewReason) =>
+    api.post(`/agents/enrollment-requests/${encodeURIComponent(requestId)}/reject`, {
+      review_reason: reviewReason,
+    }),
+  revokeAgent: (agentId, reviewReason) =>
+    api.post(`/agents/${encodeURIComponent(agentId)}/revoke`, {
+      review_reason: reviewReason,
+    }),
 };
 
 export default api;

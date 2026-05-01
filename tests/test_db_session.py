@@ -48,6 +48,9 @@ class _SchemaCursor:
         if normalized.startswith("CREATE TABLE IF NOT EXISTS agent_credentials"):
             self.conn.tables.add("agent_credentials")
             return
+        if normalized.startswith("CREATE TABLE IF NOT EXISTS agent_enrollment_requests"):
+            self.conn.tables.add("agent_enrollment_requests")
+            return
         if normalized.startswith("CREATE TABLE IF NOT EXISTS agent_request_nonces"):
             self.conn.tables.add("agent_request_nonces")
             return

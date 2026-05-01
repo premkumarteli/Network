@@ -28,11 +28,29 @@ export const getRiskTone = (riskLevel) => {
 
 export const getStatusTone = (status) => {
   const normalized = String(status || 'unknown').toLowerCase();
-  if (normalized === 'online' || normalized === 'running' || normalized === 'enabled' || normalized === 'installed' || normalized === 'healthy' || normalized === 'operational') {
+  if (
+    normalized === 'online' ||
+    normalized === 'running' ||
+    normalized === 'enabled' ||
+    normalized === 'installed' ||
+    normalized === 'healthy' ||
+    normalized === 'operational' ||
+    normalized === 'approved'
+  ) {
     return 'success';
   }
-  if (normalized === 'idle' || normalized === 'degraded' || normalized === 'warning') {
+  if (
+    normalized === 'idle' ||
+    normalized === 'degraded' ||
+    normalized === 'warning' ||
+    normalized === 'pending' ||
+    normalized === 'pending_review' ||
+    normalized === 'queued'
+  ) {
     return 'warning';
+  }
+  if (normalized === 'rejected' || normalized === 'revoked' || normalized === 'expired' || normalized === 'disabled' || normalized === 'offline' || normalized === 'failed') {
+    return 'danger';
   }
   return 'danger';
 };

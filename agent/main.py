@@ -152,6 +152,11 @@ class NetworkAgent:
 
         self.is_running = True
         self.verbose = str(os.getenv("NETVISOR_PACKET_TRACE", "false")).strip().lower() in {"1", "true", "yes", "on"}
+        self._workers_started = False
+        self._enrollment_pending = False
+        self._enrollment_status = "unknown"
+        self._enrollment_message = None
+        self._enrollment_retry_seconds = max(int(os.getenv("NETVISOR_AGENT_ENROLLMENT_RETRY_SECONDS", "15")), 1)
         
         self.device_inventory = DeviceInventory()
         self.device_detector = DeviceDetector(local_ip=self.local_ip)
@@ -197,35 +202,8 @@ class NetworkAgent:
 
         if self._background_workers_enabled:
             self._register_agent(force_reenroll=not self.api_client.has_credentials())
-
-            # Start Workers only after registration so the backend can return the
-            # canonical organization id before discovery/heartbeat traffic begins.
-            print("[*] Starting upload worker...")
-            threading.Thread(target=self._upload_worker, daemon=True).start()
-            print("[*] Starting heartbeat worker...")
-            threading.Thread(target=self._heartbeat_worker, daemon=True).start()
-            print("[*] Starting discovery engine...")
-            threading.Thread(target=self._discovery_engine, daemon=True).start()
-
-            if WebInspectionController is not None:
-                self.web_inspection = WebInspectionController(
-                    runtime_dir=AGENT_RUNTIME_DIR / "mitm",
-                    agent_id=self.agent_id,
-                    device_ip=self.local_ip,
-                    organization_id=self.organization_id,
-                    api_client=self.api_client,
-                    policy_url=self.web_policy_url,
-                    upload_url=self.web_events_url,
-                    proxy_port=self.web_proxy_port,
-                    policy_refresh_seconds=self.web_policy_refresh_seconds,
-                )
-                self.web_inspection.start()
-                logger.info(
-                    "Web inspection launchers ready: %s",
-                    ", ".join(sorted((self.web_inspection.status_snapshot().get("launcher_paths") or {}).values())),
-                )
-            else:
-                logger.warning("Web inspection is disabled because WebInspectionController could not be imported.")
+            if not self._enrollment_pending:
+                self._start_operational_workers()
         else:
             logger.info("Agent background workers disabled for probe mode.")
 
@@ -283,6 +261,9 @@ class NetworkAgent:
             "local_mac": self.local_mac,
             "background_workers_enabled": self._background_workers_enabled,
             "running": self.is_running,
+            "enrollment_status": self._enrollment_status,
+            "enrollment_pending": self._enrollment_pending,
+            "enrollment_message": self._enrollment_message,
             "upload_queue_depth": self.upload_q.qsize(),
             "device_inventory_size": len(self.device_inventory.devices),
             "flow_manager": self.flow_manager.status_snapshot(),
@@ -290,6 +271,41 @@ class NetworkAgent:
             "transport": self.api_client.status_snapshot(),
             "web_inspection": web_inspection,
         }
+
+    def _start_operational_workers(self) -> None:
+        if self._workers_started:
+            return
+
+        # Start workers only after enrollment so the backend can return the
+        # canonical organization id before discovery/heartbeat traffic begins.
+        print("[*] Starting upload worker...")
+        threading.Thread(target=self._upload_worker, daemon=True).start()
+        print("[*] Starting heartbeat worker...")
+        threading.Thread(target=self._heartbeat_worker, daemon=True).start()
+        print("[*] Starting discovery engine...")
+        threading.Thread(target=self._discovery_engine, daemon=True).start()
+
+        if WebInspectionController is not None:
+            self.web_inspection = WebInspectionController(
+                runtime_dir=AGENT_RUNTIME_DIR / "mitm",
+                agent_id=self.agent_id,
+                device_ip=self.local_ip,
+                organization_id=self.organization_id,
+                api_client=self.api_client,
+                policy_url=self.web_policy_url,
+                upload_url=self.web_events_url,
+                proxy_port=self.web_proxy_port,
+                policy_refresh_seconds=self.web_policy_refresh_seconds,
+            )
+            self.web_inspection.start()
+            logger.info(
+                "Web inspection launchers ready: %s",
+                ", ".join(sorted((self.web_inspection.status_snapshot().get("launcher_paths") or {}).values())),
+            )
+        else:
+            logger.warning("Web inspection is disabled because WebInspectionController could not be imported.")
+
+        self._workers_started = True
 
     def _register_agent(self, *, force_reenroll: bool = False):
         retry_delay = 1
@@ -312,19 +328,48 @@ class NetworkAgent:
                     timeout=5,
                     reenroll=force_reenroll,
                 )
-                r.raise_for_status()
+                try:
+                    r.raise_for_status()
+                except requests.HTTPError:
+                    response_payload = {}
+                    try:
+                        response_payload = r.json()
+                    except ValueError:
+                        response_payload = {}
+                    enrollment_status = str(response_payload.get("enrollment_status") or "").strip().lower()
+                    if r.status_code in {403, 409} or enrollment_status in {"rejected", "revoked"}:
+                        self._enrollment_pending = False
+                        self._enrollment_status = enrollment_status or "rejected"
+                        self._enrollment_message = (
+                            response_payload.get("message")
+                            or response_payload.get("detail")
+                            or "Agent enrollment was rejected."
+                        )
+                        raise RuntimeError(self._enrollment_message)
+                    raise
                 res = r.json()
+                enrollment_status = str(res.get("enrollment_status") or "").strip().lower()
                 if res.get("organization_id"):
                     self.organization_id = res["organization_id"]
                     self.flow_manager.organization_id = self.organization_id
                     if hasattr(self, "web_inspection"):
                         self.web_inspection.update_context(organization_id=self.organization_id)
+                if enrollment_status == "pending_review":
+                    self._enrollment_pending = True
+                    self._enrollment_status = enrollment_status
+                    self._enrollment_message = res.get("message") or "Enrollment pending admin approval."
+                    self._enrollment_retry_seconds = max(int(res.get("enrollment_next_retry_seconds") or self._enrollment_retry_seconds), 1)
+                    print(f"{Fore.YELLOW}[!] {self._enrollment_message}{Style.RESET_ALL}")
+                    return res
                 has_credentials = self.api_client.has_credentials()
                 if not has_credentials:
                     raise RuntimeError(
                         "Agent registration did not yield signed credentials and no stored credential is available. "
                         "This agent requires explicit credential rotation or re-enrollment before it can continue."
                     )
+                self._enrollment_pending = False
+                self._enrollment_status = "approved"
+                self._enrollment_message = res.get("message")
                 if force_reenroll:
                     print(f"{Fore.GREEN}[+] Agent re-enrolled: {self.agent_id}")
                 else:
@@ -336,6 +381,20 @@ class NetworkAgent:
                 logger.warning(f"Registration failed: {e}. Retrying...")
                 time.sleep(retry_delay)
                 retry_delay = min(retry_delay * 2, 30)
+
+    def _await_enrollment(self):
+        while self.is_running and (self._enrollment_pending or not self.api_client.has_credentials()):
+            result = self._register_agent(force_reenroll=not self.api_client.has_credentials())
+            if not self.is_running:
+                return
+            if not result:
+                continue
+            enrollment_status = str(result.get("enrollment_status") or "").strip().lower()
+            if enrollment_status == "pending_review":
+                sleep_seconds = max(int(result.get("enrollment_next_retry_seconds") or self._enrollment_retry_seconds), 1)
+                time.sleep(min(sleep_seconds, 60))
+                continue
+            break
 
     def _on_flow_expired(self, summary: FlowSummary):
         """Callback from FlowManager when a flow is ready for upload."""
@@ -575,6 +634,15 @@ class NetworkAgent:
         sys.exit(0)
 
     def start(self, timeout=None):
+        if self._enrollment_pending or not self.api_client.has_credentials():
+            self._await_enrollment()
+            if not self.api_client.has_credentials():
+                logger.warning("Agent is still pending approval; capture backend will not start yet.")
+                return
+
+        if self._background_workers_enabled and not self._workers_started:
+            self._start_operational_workers()
+
         print(f"{Fore.BLUE}[*] Netvisor Hybrid Agent Starting...")
         success, error = self.capture_backend.start(self.process_packet, timeout=timeout)
         if not success and self.capture_backend.backend_name != "scapy":

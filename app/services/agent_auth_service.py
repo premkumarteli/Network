@@ -233,6 +233,21 @@ class AgentAuthService:
 
         return self._fetch_credential_by_version(db_conn, agent_id=agent_id, key_version=key_version)
 
+    def revoke_credential(self, db_conn, *, agent_id: str) -> int:
+        cursor = db_conn.cursor()
+        try:
+            cursor.execute(
+                """
+                UPDATE agent_credentials
+                SET status = 'revoked'
+                WHERE agent_id = %s AND status IN ('active', 'rotating')
+                """,
+                (agent_id,),
+            )
+            return int(cursor.rowcount or 0)
+        finally:
+            cursor.close()
+
     def transport_pins(self) -> list[dict]:
         raw = str(settings.BACKEND_TLS_PINS_JSON or "[]").strip()
         if not raw:

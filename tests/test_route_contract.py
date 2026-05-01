@@ -36,6 +36,10 @@ FRONTEND_API_CONTRACT = {
     ("POST", "/system/actions/scan"),
     ("POST", "/system/reset-data"),
     ("GET", "/agents/"),
+    ("GET", "/agents/enrollment-requests"),
+    ("POST", "/agents/enrollment-requests/{request_id}/approve"),
+    ("POST", "/agents/enrollment-requests/{request_id}/reject"),
+    ("POST", "/agents/{agent_id}/revoke"),
     ("GET", "/agents/{agent_id}"),
 }
 

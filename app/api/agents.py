@@ -1,11 +1,13 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Body, Query
+from fastapi.responses import JSONResponse
 
 from ..core.config import settings
 from ..core.dependencies import request_rate_limit
 from ..db.session import get_db_connection
 from ..services.agent_service import agent_service
+from ..services.agent_enrollment_service import agent_enrollment_service
 from ..services.agent_auth_service import agent_auth_service, AgentAuthenticationError
 from ..services.audit_service import audit_service
 from ..services.device_service import device_service
@@ -128,6 +130,16 @@ def _resolve_org_id(cursor, requested_org_id: str | None) -> str | None:
     return requested_org_id or settings.DEFAULT_ORGANIZATION_ID
 
 
+def _resolve_source_ip(request: Request) -> str | None:
+    forwarded_for = str(request.headers.get("X-Forwarded-For") or "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip() or None
+    real_ip = str(request.headers.get("X-Real-IP") or "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else None
+
+
 def _lookup_agent_organization_id(cursor, agent_id: str) -> str | None:
     cursor.execute(
         """
@@ -144,6 +156,7 @@ def _lookup_agent_organization_id(cursor, agent_id: str) -> str | None:
 
 @router.post("/register")
 async def register_agent(
+    request: Request,
     reg: dict,
     _rate_limited: bool = Depends(agent_bootstrap_rate_limit),
     authorized: bool = Depends(validate_agent_bootstrap_key),
@@ -163,8 +176,73 @@ async def register_agent(
 
         logger.info("Registering agent %s for org %s", agent_id, org_id)
 
+        source_ip = _resolve_source_ip(request)
+        bootstrap_method = "reenroll" if bool(reg.get("reenroll")) else "bootstrap"
+        enrollment_result = agent_enrollment_service.record_request(
+            conn,
+            agent_id=agent_id,
+            organization_id=org_id,
+            hostname=reg.get("hostname"),
+            device_ip=reg.get("device_ip"),
+            device_mac=reg.get("device_mac"),
+            os_family=reg.get("os"),
+            agent_version=reg.get("version"),
+            bootstrap_method=bootstrap_method,
+            source_ip=source_ip,
+        )
+        enrollment_request = enrollment_result["request"] or {}
+        enrollment_status = str(enrollment_request.get("status") or "pending_review")
+        pending_retry_seconds = max(int(settings.AGENT_ENROLLMENT_RETRY_SECONDS), 1)
+        if enrollment_result.get("status_changed") and enrollment_status == "pending_review":
+            audit_service.log_agent_registration(
+                organization_id=str(org_id),
+                username="system",
+                agent_id=agent_id,
+                action="agent_enrollment_requested",
+                details=(
+                    f"request_id: {enrollment_request.get('request_id')}; "
+                    f"bootstrap_method: {bootstrap_method}; "
+                    f"source_ip: {source_ip or 'unknown'}; "
+                    f"hostname: {reg.get('hostname') or 'Unknown'}; "
+                    f"device_ip: {reg.get('device_ip') or '-'}; "
+                    f"device_mac: {reg.get('device_mac') or '-'}"
+                ),
+            )
+
         existing_credential = agent_auth_service.get_active_credential(conn, agent_id=agent_id)
         force_reenroll = bool(reg.get("reenroll"))
+        credential = None
+
+        response = _collect_response(
+            auth_mode="bootstrap",
+            agent_id=agent_id,
+            organization_id=org_id,
+            enrollment_status=enrollment_status,
+            enrollment_request_id=enrollment_request.get("request_id"),
+            enrollment_attempt_count=int(enrollment_request.get("attempt_count") or 0),
+            enrollment_next_retry_seconds=pending_retry_seconds,
+        )
+
+        if enrollment_status != "approved":
+            response["message"] = "Enrollment pending Fleet approval."
+            response["agent_credentials"] = None
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED, content=response)
+
+        if existing_credential and force_reenroll:
+            credential = agent_auth_service.rotate_credential(conn, agent_id=agent_id)
+            metrics_service.increment("agent_registration_reenrollments_total")
+        elif not existing_credential:
+            credential = agent_auth_service.issue_initial_credential(conn, agent_id=agent_id)
+            metrics_service.increment("agent_registration_initial_enrollments_total")
+        else:
+            metrics_service.increment("agent_registration_reregistrations_total")
+
+        if credential:
+            agent_enrollment_service.mark_credential_issued(
+                conn,
+                agent_id=agent_id,
+                issued_at=credential.issued_at,
+            )
 
         agent_service.upsert_agent(
             conn,
@@ -203,33 +281,24 @@ async def register_agent(
             create_if_missing=True,
         )
 
-        credential = None
-        if existing_credential and force_reenroll:
-            credential = agent_auth_service.rotate_credential(conn, agent_id=agent_id)
-            metrics_service.increment("agent_registration_reenrollments_total")
-        elif not existing_credential:
-            credential = agent_auth_service.issue_initial_credential(conn, agent_id=agent_id)
-            metrics_service.increment("agent_registration_initial_enrollments_total")
-        else:
-            metrics_service.increment("agent_registration_reregistrations_total")
-
-        conn.commit()
-
         audit_service.log_agent_registration(
             organization_id=str(org_id),
             username="system",
             agent_id=agent_id,
-            action="agent_registration_via_bootstrap",
-            details="first_time" if credential else "re_registration",
+            action="agent_enrollment_completed" if credential else "agent_reregistration",
+            details=(
+                "first_time"
+                if credential and not force_reenroll
+                else "reenrollment" if credential and force_reenroll
+                else "already_registered"
+            ),
         )
 
-        response = _collect_response(
-            auth_mode="bootstrap",
-            agent_id=agent_id,
-            organization_id=org_id,
-        )
+        conn.commit()
+
         if credential:
             response["agent_credentials"] = credential.as_response()
+            response["message"] = "Agent enrollment approved."
         else:
             response["agent_credentials"] = None
             response["message"] = "Agent already registered. Use explicit rotation endpoint for credential updates."

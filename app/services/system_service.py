@@ -21,6 +21,7 @@ class SystemService:
         "sessions",
         "external_endpoints",
         "alerts",
+        "agent_enrollment_requests",
         "devices",
         "device_ip_history",
         "device_aliases",

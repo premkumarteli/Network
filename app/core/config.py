@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     AGENT_BOOTSTRAP_RATE_LIMIT_PER_MINUTE: int = Field(default=30, validation_alias="NETVISOR_AGENT_BOOTSTRAP_RATE_LIMIT_PER_MINUTE")
     AGENT_CONTROL_RATE_LIMIT_PER_MINUTE: int = Field(default=240, validation_alias="NETVISOR_AGENT_CONTROL_RATE_LIMIT_PER_MINUTE")
     AGENT_FLOW_RATE_LIMIT_PER_MINUTE: int = Field(default=1200, validation_alias="NETVISOR_AGENT_FLOW_RATE_LIMIT_PER_MINUTE")
+    AGENT_ENROLLMENT_PENDING_TTL_SECONDS: int = Field(
+        default=86400,
+        validation_alias="NETVISOR_AGENT_ENROLLMENT_PENDING_TTL_SECONDS",
+    )
+    AGENT_ENROLLMENT_RETRY_SECONDS: int = Field(
+        default=15,
+        validation_alias="NETVISOR_AGENT_ENROLLMENT_RETRY_SECONDS",
+    )
     ADMIN_MUTATION_RATE_LIMIT_PER_MINUTE: int = Field(default=30, validation_alias="NETVISOR_ADMIN_MUTATION_RATE_LIMIT_PER_MINUTE")
     FLOW_WORKER_MODE: str = Field(default="embedded", validation_alias="NETVISOR_FLOW_WORKER_MODE")
     FLOW_WORKER_POLL_SECONDS: float = Field(default=1.0, validation_alias="NETVISOR_FLOW_WORKER_POLL_SECONDS")

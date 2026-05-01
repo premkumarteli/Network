@@ -264,6 +264,19 @@ class AgentService:
             "inspection_last_event_at": inspection_metrics.get("last_event_at"),
             "inspection_last_upload_at": inspection_metrics.get("last_upload_at"),
             "inspection_drop_reasons": inspection_metrics.get("drop_reasons") or {},
+            "enrollment_request_id": row.get("enrollment_request_id"),
+            "enrollment_status": row.get("enrollment_status") or "approved",
+            "enrollment_attempt_count": int(row.get("enrollment_attempt_count") or 0),
+            "enrollment_first_seen": self._format_timestamp(row.get("enrollment_first_seen")),
+            "enrollment_last_seen": self._format_timestamp(row.get("enrollment_last_seen")),
+            "enrollment_expires_at": self._format_timestamp(row.get("enrollment_expires_at")),
+            "enrollment_bootstrap_method": row.get("enrollment_bootstrap_method"),
+            "enrollment_source_ip": row.get("enrollment_source_ip"),
+            "enrollment_machine_fingerprint": row.get("enrollment_machine_fingerprint"),
+            "enrollment_reviewed_by": row.get("enrollment_reviewed_by"),
+            "enrollment_reviewed_at": self._format_timestamp(row.get("enrollment_reviewed_at")),
+            "enrollment_review_reason": row.get("enrollment_review_reason"),
+            "enrollment_credential_issued_at": self._format_timestamp(row.get("enrollment_credential_issued_at")),
             "cpu_usage": float(row.get("cpu_usage") or 0.0),
             "ram_usage": float(row.get("ram_usage") or 0.0),
         }
@@ -330,11 +343,25 @@ class AgentService:
                     a.last_seen,
                     a.cpu_usage,
                     a.ram_usage,
+                    aer.request_id AS enrollment_request_id,
+                    COALESCE(aer.status, 'approved') AS enrollment_status,
+                    aer.attempt_count AS enrollment_attempt_count,
+                    aer.first_seen AS enrollment_first_seen,
+                    aer.last_seen AS enrollment_last_seen,
+                    aer.expires_at AS enrollment_expires_at,
+                    aer.bootstrap_method AS enrollment_bootstrap_method,
+                    aer.source_ip AS enrollment_source_ip,
+                    aer.machine_fingerprint AS enrollment_machine_fingerprint,
+                    aer.reviewed_by AS enrollment_reviewed_by,
+                    aer.reviewed_at AS enrollment_reviewed_at,
+                    aer.review_reason AS enrollment_review_reason,
+                    aer.credential_issued_at AS enrollment_credential_issued_at,
                     md.hostname AS managed_hostname,
                     md.device_ip AS managed_ip,
                     md.os_family AS managed_os_family
                 FROM agents a
                 LEFT JOIN managed_devices md ON md.agent_id = a.id
+                LEFT JOIN agent_enrollment_requests aer ON aer.agent_id = a.id
             """
             if organization_id and not settings.SINGLE_ORG_MODE:
                 query += " WHERE a.organization_id = %s OR a.organization_id IS NULL"

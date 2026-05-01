@@ -17,6 +17,7 @@ from .realtime import (
     socket_room_for_organization,
 )
 from .db.session import ensure_bootstrap_state, get_db_connection
+from .services.agent_enrollment_service import agent_enrollment_service
 from .services.application_service import application_service
 from .middleware.request_context import RequestContextMiddleware
 from .services.system_service import system_service
@@ -89,6 +90,7 @@ async def lifespan(app: FastAPI):
     startup_conn = None
     try:
         startup_conn = get_db_connection()
+        agent_enrollment_service.ensure_schema(startup_conn)
         application_service.ensure_schema(startup_conn)
         web_inspection_service.ensure_schema(startup_conn)
         if settings.RESET_RUNTIME_ON_STARTUP:

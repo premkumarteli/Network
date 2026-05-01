@@ -49,6 +49,35 @@ CREATE TABLE IF NOT EXISTS agents (
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_enrollment_requests (
+    request_id CHAR(36) PRIMARY KEY,
+    agent_id VARCHAR(100) NOT NULL,
+    organization_id CHAR(36),
+    hostname VARCHAR(100) DEFAULT 'Unknown',
+    device_ip VARCHAR(50) DEFAULT '-',
+    device_mac VARCHAR(50) DEFAULT '-',
+    os_family VARCHAR(50) DEFAULT 'Unknown',
+    agent_version VARCHAR(50) DEFAULT 'Unknown',
+    bootstrap_method VARCHAR(32) DEFAULT 'bootstrap',
+    source_ip VARCHAR(50),
+    machine_fingerprint CHAR(64),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending_review',
+    attempt_count INT NOT NULL DEFAULT 0,
+    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NULL,
+    reviewed_by VARCHAR(100),
+    reviewed_at DATETIME NULL,
+    review_reason TEXT,
+    credential_issued_at DATETIME NULL,
+    UNIQUE KEY uq_agent_enrollment_agent (agent_id),
+    INDEX idx_agent_enrollment_status_last_seen (status, last_seen),
+    INDEX idx_agent_enrollment_org_last_seen (organization_id, last_seen),
+    INDEX idx_agent_enrollment_fingerprint (machine_fingerprint),
+    INDEX idx_agent_enrollment_expires_at (expires_at),
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS agent_credentials (
     agent_id VARCHAR(100) NOT NULL,
     key_version INT NOT NULL,

@@ -81,6 +81,7 @@ REQUIRED_SECURITY_COLUMNS = {
 
 REQUIRED_RUNTIME_TABLES = (
     "agents",
+    "agent_enrollment_requests",
     "devices",
     "device_ip_history",
     "managed_devices",
@@ -113,6 +114,27 @@ REQUIRED_RUNTIME_COLUMNS = {
         "inspection_metrics_json",
         "cpu_usage",
         "ram_usage",
+    },
+    "agent_enrollment_requests": {
+        "agent_id",
+        "organization_id",
+        "hostname",
+        "device_ip",
+        "device_mac",
+        "os_family",
+        "agent_version",
+        "bootstrap_method",
+        "source_ip",
+        "machine_fingerprint",
+        "status",
+        "attempt_count",
+        "first_seen",
+        "last_seen",
+        "expires_at",
+        "reviewed_by",
+        "reviewed_at",
+        "review_reason",
+        "credential_issued_at",
     },
     "devices": {
         "first_seen",
@@ -165,6 +187,13 @@ REQUIRED_RUNTIME_COLUMNS = {
 REQUIRED_RUNTIME_INDEXES = {
     "agents": {
         "idx_agents_org_last_seen",
+    },
+    "agent_enrollment_requests": {
+        "uq_agent_enrollment_agent",
+        "idx_agent_enrollment_status_last_seen",
+        "idx_agent_enrollment_org_last_seen",
+        "idx_agent_enrollment_fingerprint",
+        "idx_agent_enrollment_expires_at",
     },
     "devices": {
         "idx_devices_org_last_seen",
