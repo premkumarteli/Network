@@ -68,6 +68,10 @@ def _validate_runtime_config() -> None:
         logger.warning(
             "NETVISOR_AGENT_MASTER_KEY and NETVISOR_GATEWAY_MASTER_KEY are identical. Use distinct signing roots."
         )
+    if settings.ALLOW_LAN_HTTP:
+        logger.warning(
+            "NETVISOR_ALLOW_LAN_HTTP=true weakens transport security and should only be used in an isolated lab environment."
+        )
     
 # Socket.IO setup
 p_sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins=_allowed_origins(), cors_credentials=True)
@@ -124,7 +128,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
 
-# Transport security middleware - enforces HTTPS for agent/gateway endpoints in production
+# Transport security middleware - enforces HTTPS for agent/gateway endpoints, with an explicit lab-only LAN HTTP override
 app.add_middleware(TransportSecurityMiddleware)
 app.add_middleware(CSRFProtectionMiddleware)
 app.add_middleware(RequestContextMiddleware)

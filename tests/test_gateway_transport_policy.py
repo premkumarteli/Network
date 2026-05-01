@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 
+import pytest
 import requests
 
 from gateway.security.dpapi import DataProtector
@@ -60,17 +61,28 @@ def test_remote_backend_requires_https():
 def test_remote_https_requires_seed_pins():
     client = _client(_tmpdir())
 
-    try:
+    with pytest.raises(requests.exceptions.SSLError, match="require configured TLS pins"):
         client._enforce_transport_policy("https://example.com/api/v1/gateway/register")
-        assert False, "Expected remote HTTPS without pins to be rejected"
-    except requests.exceptions.SSLError as exc:
-        assert "require configured TLS pins" in str(exc)
+
+
+def test_private_lan_http_requires_explicit_opt_in():
+    client = _client(_tmpdir())
+
+    with pytest.raises(requests.exceptions.SSLError, match="must use HTTPS"):
+        client._enforce_transport_policy("http://10.159.79.96:8000/api/v1/gateway/register")
 
 
 def test_local_http_is_allowed_without_pins():
     client = _client(_tmpdir())
 
     client._enforce_transport_policy("http://127.0.0.1:8000/api/v1/gateway/register")
+
+
+def test_private_lan_http_is_allowed_when_opt_in_enabled(monkeypatch):
+    monkeypatch.setenv("NETVISOR_ALLOW_LAN_HTTP", "true")
+    client = _client(_tmpdir())
+
+    client._enforce_transport_policy("http://10.159.79.96:8000/api/v1/gateway/register")
 
 
 def test_remote_tls_pin_mismatch_is_rejected(monkeypatch):

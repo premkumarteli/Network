@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     BOOTSTRAP_ADMIN_USERNAME: str = Field(default="admin", validation_alias="NETVISOR_BOOTSTRAP_ADMIN_USERNAME")
     BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = Field(default=None, validation_alias="NETVISOR_BOOTSTRAP_ADMIN_PASSWORD")
     ALLOW_SELF_REGISTER: bool = Field(default=False, validation_alias="NETVISOR_ALLOW_SELF_REGISTER")
+    ALLOW_LAN_HTTP: bool = Field(default=False, validation_alias="NETVISOR_ALLOW_LAN_HTTP")
     RESET_RUNTIME_ON_STARTUP: bool = Field(default=False, validation_alias="NETVISOR_RESET_RUNTIME_ON_STARTUP")
     BACKUP_AND_RESET_ON_SHUTDOWN: bool = Field(default=False, validation_alias="NETVISOR_BACKUP_AND_RESET_ON_SHUTDOWN")
     CORS_ORIGINS_RAW: str = Field(

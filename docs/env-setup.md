@@ -44,3 +44,4 @@ python scripts/init_env.py --force
 - Never commit `.env`.
 - Update `.env.example` when a new variable is added.
 - Keep deployment-specific secrets in the deployment system or the generated `.env` for that target.
+- If you need a lab-only LAN HTTP test between the backend and a copied agent or gateway, set `NETVISOR_ALLOW_LAN_HTTP=true` on both sides. Leave it `false` for normal use.

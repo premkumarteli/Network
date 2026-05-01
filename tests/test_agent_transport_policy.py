@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import requests
 
 from agent.security.dpapi import DataProtector
@@ -36,14 +37,25 @@ def test_remote_backend_requires_https(tmp_path):
 def test_remote_https_requires_seed_pins(tmp_path):
     client = _client(tmp_path)
 
-    try:
+    with pytest.raises(requests.exceptions.SSLError, match="require configured TLS pins"):
         client._enforce_transport_policy("https://example.com/api/v1/collect/register")
-        assert False, "Expected remote HTTPS without pins to be rejected"
-    except requests.exceptions.SSLError as exc:
-        assert "require configured TLS pins" in str(exc)
+
+
+def test_private_lan_http_requires_explicit_opt_in(tmp_path):
+    client = _client(tmp_path)
+
+    with pytest.raises(requests.exceptions.SSLError, match="must use HTTPS"):
+        client._enforce_transport_policy("http://10.159.79.96:8000/api/v1/collect/register")
 
 
 def test_local_http_is_allowed_without_pins(tmp_path):
     client = _client(tmp_path)
 
     client._enforce_transport_policy("http://127.0.0.1:8000/api/v1/collect/register")
+
+
+def test_private_lan_http_is_allowed_when_opt_in_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("NETVISOR_ALLOW_LAN_HTTP", "true")
+    client = _client(tmp_path)
+
+    client._enforce_transport_policy("http://10.159.79.96:8000/api/v1/collect/register")

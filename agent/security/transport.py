@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ipaddress
+import os
 import hashlib
 import json
 import logging
@@ -41,6 +43,7 @@ class AgentApiClient:
     ) -> None:
         self.session = requests.Session()
         self.bootstrap_api_key = str(bootstrap_api_key or "")
+        self.allow_lan_http = str(os.getenv("NETVISOR_ALLOW_LAN_HTTP", "false")).strip().lower() in {"1", "true", "yes", "on"}
         self.store = ProtectedStateStore(
             state_path,
             protector=protector or WindowsCurrentUserProtector(),
@@ -99,10 +102,24 @@ class AgentApiClient:
         hostname = (parsed.hostname or "").strip().lower()
         return hostname in {"127.0.0.1", "localhost", "::1"}
 
+    def _is_private_lan_url(self, url: str) -> bool:
+        if not self.allow_lan_http:
+            return False
+        parsed = urlparse(url)
+        hostname = (parsed.hostname or "").strip().lower()
+        if not hostname:
+            return False
+        try:
+            return ipaddress.ip_address(hostname).is_private
+        except ValueError:
+            return False
+
     def _enforce_transport_policy(self, url: str) -> None:
         parsed = urlparse(url)
         scheme = parsed.scheme.lower()
         if self._is_local_url(url):
+            return
+        if scheme != "https" and self._is_private_lan_url(url):
             return
         if scheme != "https":
             raise requests.exceptions.SSLError("Remote backend connections must use HTTPS.")
