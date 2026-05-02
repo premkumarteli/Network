@@ -201,6 +201,28 @@ class FlowService:
     def _batch_id_from_payload_json(self, payload_json: str) -> str:
         return sha256(payload_json.encode("utf-8")).hexdigest()
 
+    def _load_device_baselines(self, cursor, device_ids: set[str]) -> dict[str, dict]:
+        normalized_ids = sorted({str(device_id).strip() for device_id in device_ids if device_id})
+        if not normalized_ids:
+            return {}
+
+        placeholders = ", ".join(["%s"] * len(normalized_ids))
+        cursor.execute(
+            f"SELECT * FROM device_baselines WHERE device_id IN ({placeholders})",
+            tuple(normalized_ids),
+        )
+        return {row["device_id"]: row for row in cursor.fetchall() or [] if row.get("device_id")}
+
+    def _alert_dedupe_key(self, organization_id: str | None, sanitized, report: dict) -> tuple:
+        reasons = tuple(sorted(str(reason) for reason in report.get("reasons", []) if reason))
+        primary_detection = report.get("primary_detection") or ";".join(reasons) or "generic"
+        return (
+            organization_id or "-",
+            sanitized.internal_device_ip or "-",
+            report.get("severity") or "UNKNOWN",
+            primary_detection,
+        )
+
     def _enforce_backpressure(self, db_conn, incoming_flows: int) -> None:
         counts = self._queue_status_counts(db_conn) or {}
         pending_flows = max(int(counts.get("pending_flows") or 0), 0)
@@ -799,6 +821,8 @@ class FlowService:
         managed_ip_cache = {}
         organization_cache = {}
         seen_hashes: set[str] = set()
+        alert_keys_seen: set[tuple] = set()
+        sanitized_batch = []
 
         for flow in batch:
             org_id = self._resolve_organization_id(
@@ -812,7 +836,18 @@ class FlowService:
             if sanitized.ingest_hash in seen_hashes:
                 continue
             seen_hashes.add(sanitized.ingest_hash)
+            sanitized_batch.append((org_id, sanitized))
 
+        baseline_cache = self._load_device_baselines(
+            cursor,
+            {
+                sanitized.internal_device_ip
+                for _, sanitized in sanitized_batch
+                if sanitized.internal_device_ip
+            },
+        )
+
+        for org_id, sanitized in sanitized_batch:
             if org_id not in managed_ip_cache:
                 managed_ip_cache[org_id] = managed_device_service.get_managed_ip_set(conn, org_id)
 
@@ -820,13 +855,7 @@ class FlowService:
             source_type = sanitized.source_type
             metadata_only = sanitized.metadata_only
 
-            baseline = None
-            if sanitized.internal_device_ip:
-                cursor.execute(
-                    "SELECT * FROM device_baselines WHERE device_id = %s",
-                    (sanitized.internal_device_ip,),
-                )
-                baseline = cursor.fetchone()
+            baseline = baseline_cache.get(sanitized.internal_device_ip) if sanitized.internal_device_ip else None
 
             report = risk_engine.evaluate_flow(sanitized, baseline)
             application = application_service.classify_app(sanitized)
@@ -932,7 +961,13 @@ class FlowService:
                     ),
                 )
 
+            should_emit_alert = False
             if sanitized.internal_device_ip and report["severity"] in ["MEDIUM", "HIGH", "CRITICAL"]:
+                alert_key = self._alert_dedupe_key(org_id, sanitized, report)
+                should_emit_alert = alert_key not in alert_keys_seen
+                alert_keys_seen.add(alert_key)
+
+            if should_emit_alert:
                 cursor.execute(
                     """
                     INSERT INTO alerts (organization_id, device_ip, severity, risk_score, breakdown_json)
@@ -967,7 +1002,7 @@ class FlowService:
                 )
             )
 
-            if report["severity"] in ["MEDIUM", "HIGH", "CRITICAL"]:
+            if should_emit_alert:
                 events_to_emit.append(
                     (
                         "alert_event",

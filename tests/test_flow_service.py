@@ -178,6 +178,52 @@ def test_batch_id_is_stable_for_equivalent_payloads():
     assert flow_service._batch_id_from_payload_json(payload_json_a) == flow_service._batch_id_from_payload_json(payload_json_b)
 
 
+class _BaselineCursor:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, query, params=None):
+        self.calls.append((" ".join(query.split()), params))
+
+    def fetchall(self):
+        return [
+            {"device_id": "10.0.0.10", "avg_connections_per_min": 4.0},
+            {"device_id": "10.0.0.11", "avg_connections_per_min": 2.0},
+        ]
+
+
+def test_device_baselines_are_loaded_in_one_batch_query():
+    cursor = _BaselineCursor()
+
+    baselines = flow_service._load_device_baselines(cursor, {"10.0.0.11", "10.0.0.10", ""})
+
+    assert set(baselines) == {"10.0.0.10", "10.0.0.11"}
+    assert len(cursor.calls) == 1
+    query, params = cursor.calls[0]
+    assert query == "SELECT * FROM device_baselines WHERE device_id IN (%s, %s)"
+    assert params == ("10.0.0.10", "10.0.0.11")
+
+
+def test_alert_dedupe_key_groups_same_device_detection():
+    sanitized = SimpleNamespace(internal_device_ip="10.0.0.10")
+    report = {
+        "severity": "HIGH",
+        "primary_detection": "Possible C2 Beaconing",
+        "reasons": ["Possible C2 Beaconing"],
+    }
+
+    first = flow_service._alert_dedupe_key("org-1", sanitized, report)
+    second = flow_service._alert_dedupe_key("org-1", sanitized, dict(report))
+    different = flow_service._alert_dedupe_key(
+        "org-1",
+        sanitized,
+        {"severity": "HIGH", "primary_detection": "Port Scanning Detected", "reasons": ["Port Scanning Detected"]},
+    )
+
+    assert first == second
+    assert first != different
+
+
 def test_buffer_flow_raises_backpressure_when_queue_depth_is_exceeded(monkeypatch):
     conn = _QueueConnection()
     item = SimpleNamespace(
