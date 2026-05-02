@@ -218,12 +218,18 @@ REQUIRED_RUNTIME_INDEXES = {
         "idx_worker_heartbeats_type_seen",
     },
     "flow_logs": {
+        "idx_flow_logs_dst",
+        "idx_flow_logs_org_last_seen",
         "idx_flow_logs_internal_last_seen",
         "idx_flow_logs_scope_last_seen",
         "idx_flow_logs_session_id",
         "idx_flow_logs_org_app_last_seen",
         "idx_flow_logs_app_src_last_seen",
+        "idx_flow_logs_domain_last_seen",
         "idx_flow_logs_sni_last_seen",
+    },
+    "alerts": {
+        "idx_alerts_org_device_severity_time",
     },
     "external_endpoints": {
         "idx_external_endpoints_org_last_seen",

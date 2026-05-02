@@ -1,5 +1,6 @@
 import asyncio
 from hashlib import sha256
+import ipaddress
 import json
 import logging
 import threading
@@ -222,6 +223,65 @@ class FlowService:
             report.get("severity") or "UNKNOWN",
             primary_detection,
         )
+
+    def _build_flow_search_filter(self, search: str | None) -> tuple[str | None, list]:
+        text = str(search or "").strip()[:128]
+        if not text:
+            return None, []
+
+        try:
+            ipaddress.ip_address(text)
+            return (
+                "(src_ip = %s OR dst_ip = %s OR internal_device_ip = %s OR external_endpoint_ip = %s)",
+                [text, text, text, text],
+            )
+        except ValueError:
+            pass
+
+        lowered = text.lower()
+        prefix = f"{lowered}%"
+        app_prefix = f"{text}%"
+        if "." in lowered and " " not in lowered:
+            return (
+                "(domain = %s OR sni = %s OR domain LIKE %s OR sni LIKE %s OR application = %s)",
+                [lowered, lowered, prefix, prefix, text],
+            )
+
+        return (
+            "(application = %s OR application LIKE %s OR domain LIKE %s OR sni LIKE %s)",
+            [text, app_prefix, prefix, prefix],
+        )
+
+    def _recent_alert_exists(self, cursor, organization_id: str | None, sanitized, report: dict) -> bool:
+        window_seconds = max(int(settings.FLOW_ALERT_DEDUPE_WINDOW_SECONDS or 0), 0)
+        if not window_seconds or not sanitized.internal_device_ip:
+            return False
+
+        reasons = [str(reason) for reason in report.get("reasons", []) if reason]
+        primary_detection = report.get("primary_detection") or (reasons[0] if reasons else "")
+        if not primary_detection:
+            return False
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM alerts
+            WHERE organization_id <=> %s
+              AND device_ip = %s
+              AND severity = %s
+              AND timestamp >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)
+              AND breakdown_json LIKE %s
+            LIMIT 1
+            """,
+            (
+                organization_id,
+                sanitized.internal_device_ip,
+                report.get("severity"),
+                window_seconds,
+                f"%{primary_detection}%",
+            ),
+        )
+        return cursor.fetchone() is not None
 
     def _enforce_backpressure(self, db_conn, incoming_flows: int) -> None:
         counts = self._queue_status_counts(db_conn) or {}
@@ -964,8 +1024,9 @@ class FlowService:
             should_emit_alert = False
             if sanitized.internal_device_ip and report["severity"] in ["MEDIUM", "HIGH", "CRITICAL"]:
                 alert_key = self._alert_dedupe_key(org_id, sanitized, report)
-                should_emit_alert = alert_key not in alert_keys_seen
-                alert_keys_seen.add(alert_key)
+                if alert_key not in alert_keys_seen:
+                    alert_keys_seen.add(alert_key)
+                    should_emit_alert = not self._recent_alert_exists(cursor, org_id, sanitized, report)
 
             if should_emit_alert:
                 cursor.execute(
@@ -1132,10 +1193,10 @@ class FlowService:
                 # For now, let's just filter by a potential severity column if we add it, 
                 # but typically severity is computed. Let's filter by application/IP for now.
                 pass
-            if search:
-                where_clauses.append("(src_ip LIKE %s OR dst_ip LIKE %s OR domain LIKE %s OR sni LIKE %s OR application LIKE %s)")
-                search_param = f"%{search}%"
-                params.extend([search_param] * 5)
+            search_clause, search_params = self._build_flow_search_filter(search)
+            if search_clause:
+                where_clauses.append(search_clause)
+                params.extend(search_params)
 
             where_str = " AND ".join(where_clauses)
             

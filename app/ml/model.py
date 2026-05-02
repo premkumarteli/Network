@@ -5,17 +5,26 @@ from sklearn.utils.validation import check_is_fitted
 import joblib
 import os
 
+from .features import FEATURE_NAMES, FEATURE_VERSION
+
 logger = logging.getLogger("netvisor.ml.model")
 
 class NetVisorModel:
     def __init__(self, model_path="data/models/isolation_forest.pkl"):
         self.model_path = model_path
+        self.feature_version = FEATURE_VERSION
+        self.feature_names = list(FEATURE_NAMES)
         self.model = self._load_model()
 
     def _load_model(self):
         if os.path.exists(self.model_path):
             try:
-                return joblib.load(self.model_path)
+                loaded = joblib.load(self.model_path)
+                if isinstance(loaded, dict) and "model" in loaded:
+                    self.feature_version = loaded.get("feature_version") or FEATURE_VERSION
+                    self.feature_names = list(loaded.get("feature_names") or FEATURE_NAMES)
+                    return loaded["model"]
+                return loaded
             except (OSError, ValueError, EOFError) as e:
                 logger.warning(f"Failed to load model: {e}, using default")
         return IsolationForest(contamination=0.01, random_state=42)
@@ -25,8 +34,24 @@ class NetVisorModel:
         self.model.fit(X)
         # Ensure directory exists before saving
         os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
-        joblib.dump(self.model, self.model_path)
+        joblib.dump(
+            {
+                "model": self.model,
+                "feature_version": self.feature_version,
+                "feature_names": self.feature_names,
+            },
+            self.model_path,
+        )
         logger.info(f"Model fitted and saved to {self.model_path}")
+
+    def metadata(self) -> dict:
+        return {
+            "model_type": self.model.__class__.__name__,
+            "feature_version": self.feature_version,
+            "feature_names": list(self.feature_names),
+            "feature_count": len(self.feature_names),
+            "model_path": self.model_path,
+        }
 
     def predict(self, features: list) -> float:
         try:

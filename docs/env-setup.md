@@ -46,3 +46,4 @@ python scripts/init_env.py --force
 - Keep deployment-specific secrets in the deployment system or the generated `.env` for that target.
 - If you need a lab-only LAN HTTP test between the backend and a copied agent or gateway, set `NETVISOR_ALLOW_LAN_HTTP=true` on both sides. Leave it `false` for normal use.
 - Tune `NETVISOR_AGENT_ENROLLMENT_PENDING_TTL_SECONDS` and `NETVISOR_AGENT_ENROLLMENT_RETRY_SECONDS` only when you want to change how long Fleet keeps unapproved agents in the review queue or how often the agent retries enrollment while pending.
+- Tune `NETVISOR_FLOW_ALERT_DEDUPE_WINDOW_SECONDS` only when repeated high-risk flows are either too noisy or too aggressively collapsed. The default keeps duplicate device/detection alerts quiet for five minutes.

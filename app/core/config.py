@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     FLOW_INGEST_CLAIM_TTL_SECONDS: int = Field(default=120, validation_alias="NETVISOR_FLOW_INGEST_CLAIM_TTL_SECONDS")
     FLOW_INGEST_MAX_PENDING_FLOWS: int = Field(default=50000, validation_alias="NETVISOR_FLOW_INGEST_MAX_PENDING_FLOWS")
     FLOW_INGEST_MAX_LAG_SECONDS: int = Field(default=30, validation_alias="NETVISOR_FLOW_INGEST_MAX_LAG_SECONDS")
+    FLOW_ALERT_DEDUPE_WINDOW_SECONDS: int = Field(
+        default=300,
+        validation_alias="NETVISOR_FLOW_ALERT_DEDUPE_WINDOW_SECONDS",
+    )
 
     DB_HOST: str = Field(default="localhost", validation_alias="NETVISOR_DB_HOST")
     DB_USER: str = Field(default="root", validation_alias="NETVISOR_DB_USER")

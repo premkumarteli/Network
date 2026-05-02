@@ -224,6 +224,53 @@ def test_alert_dedupe_key_groups_same_device_detection():
     assert first != different
 
 
+def test_flow_search_filter_uses_exact_ip_lookup():
+    clause, params = flow_service._build_flow_search_filter("10.0.0.10")
+
+    assert "LIKE" not in clause
+    assert "src_ip = %s" in clause
+    assert "external_endpoint_ip = %s" in clause
+    assert params == ["10.0.0.10"] * 4
+
+
+def test_flow_search_filter_uses_prefix_terms_for_text_search():
+    clause, params = flow_service._build_flow_search_filter("Micro")
+
+    assert "%Micro%" not in params
+    assert "%micro%" not in params
+    assert params == ["Micro", "Micro%", "micro%", "micro%"]
+    assert "application LIKE %s" in clause
+
+
+class _RecentAlertCursor:
+    def __init__(self, row):
+        self.row = row
+        self.calls = []
+
+    def execute(self, query, params=None):
+        self.calls.append((" ".join(query.split()), params))
+
+    def fetchone(self):
+        return self.row
+
+
+def test_recent_alert_exists_uses_configured_time_window(monkeypatch):
+    monkeypatch.setattr(flow_service_module.settings, "FLOW_ALERT_DEDUPE_WINDOW_SECONDS", 120)
+    cursor = _RecentAlertCursor({"id": 1})
+    sanitized = SimpleNamespace(internal_device_ip="10.0.0.10")
+    report = {
+        "severity": "HIGH",
+        "primary_detection": "Possible C2 Beaconing",
+        "reasons": ["Possible C2 Beaconing"],
+    }
+
+    assert flow_service._recent_alert_exists(cursor, "org-1", sanitized, report) is True
+
+    query, params = cursor.calls[0]
+    assert "DATE_SUB(UTC_TIMESTAMP(), INTERVAL %s SECOND)" in query
+    assert params == ("org-1", "10.0.0.10", "HIGH", 120, "%Possible C2 Beaconing%")
+
+
 def test_buffer_flow_raises_backpressure_when_queue_depth_is_exceeded(monkeypatch):
     conn = _QueueConnection()
     item = SimpleNamespace(

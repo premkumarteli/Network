@@ -1,15 +1,11 @@
 from ..ml.model import model
+from ..ml.features import extract_flow_features, feature_metadata
 
 class MLService:
     def predict_anomaly(self, flow) -> float:
-        features = [
-            getattr(flow, "packet_count", 0),
-            getattr(flow, "byte_count", 0),
-            getattr(flow, "duration", 0),
-            getattr(flow, "average_packet_size", 0),
-            getattr(flow, "src_port", 0),
-            getattr(flow, "dst_port", 0)
-        ]
-        return model.predict(features)
+        return model.predict(extract_flow_features(flow))
+
+    def feature_metadata(self) -> dict:
+        return feature_metadata()
 
 ml_service = MLService()

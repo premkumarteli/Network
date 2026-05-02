@@ -186,11 +186,14 @@ CREATE TABLE IF NOT EXISTS flow_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_flow_logs_org (organization_id),
     INDEX idx_flow_logs_src (src_ip),
+    INDEX idx_flow_logs_dst (dst_ip),
     INDEX idx_flow_logs_last_seen (last_seen),
+    INDEX idx_flow_logs_org_last_seen (organization_id, last_seen),
     INDEX idx_flow_logs_internal_last_seen (internal_device_ip, last_seen),
     INDEX idx_flow_logs_scope_last_seen (network_scope, last_seen),
     INDEX idx_flow_logs_org_app_last_seen (organization_id, application, last_seen),
     INDEX idx_flow_logs_app_src_last_seen (application, src_ip, last_seen),
+    INDEX idx_flow_logs_domain_last_seen (domain, last_seen),
     INDEX idx_flow_logs_sni_last_seen (sni, last_seen),
     INDEX idx_flow_logs_session_id (session_id),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
@@ -208,6 +211,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     INDEX idx_alerts_org (organization_id),
     INDEX idx_alerts_device (device_ip),
     INDEX idx_alerts_timestamp (timestamp),
+    INDEX idx_alerts_org_device_severity_time (organization_id, device_ip, severity, timestamp),
     FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE SET NULL
 );
 

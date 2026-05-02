@@ -1,8 +1,30 @@
-import pytest
 import numpy as np
 import os
-import shutil
+from types import SimpleNamespace
+
+import joblib
+
+from app.ml.features import FEATURE_NAMES, FEATURE_VERSION, extract_flow_features, feature_metadata
 from app.ml.model import NetVisorModel
+
+
+def test_flow_feature_contract_is_versioned():
+    flow = SimpleNamespace(
+        packet_count=10,
+        byte_count=2048,
+        duration=2.5,
+        average_packet_size=204.8,
+        src_port=51515,
+        dst_port=443,
+    )
+
+    assert extract_flow_features(flow) == [10.0, 2048.0, 2.5, 204.8, 51515.0, 443.0]
+    assert feature_metadata() == {
+        "feature_version": FEATURE_VERSION,
+        "feature_names": list(FEATURE_NAMES),
+        "feature_count": len(FEATURE_NAMES),
+    }
+
 
 def test_unfitted_model_returns_zero():
     """Verify that an unfitted model returns 0.0 without errors."""
@@ -36,6 +58,10 @@ def test_model_fitting_and_prediction():
     features = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
     score = model.predict(features)
     assert 0.0 <= score <= 1.0
+    persisted = joblib.load(temp_model_path)
+    assert persisted["feature_version"] == FEATURE_VERSION
+    assert persisted["feature_names"] == list(FEATURE_NAMES)
+    assert model.metadata()["feature_count"] == len(FEATURE_NAMES)
     
     # Cleanup
     if os.path.exists(temp_model_path):
