@@ -252,6 +252,38 @@ class FlowService:
             [text, app_prefix, prefix, prefix],
         )
 
+    def build_flow_log_query_parts(
+        self,
+        organization_id: str,
+        *,
+        src_ip: str | None = None,
+        dst_ip: str | None = None,
+        application: str | None = None,
+        severity: str | None = None,
+        search: str | None = None,
+    ) -> tuple[str, list]:
+        params = [organization_id]
+        where_clauses = ["organization_id = %s"]
+
+        if src_ip:
+            where_clauses.append("src_ip = %s")
+            params.append(src_ip)
+        if dst_ip:
+            where_clauses.append("dst_ip = %s")
+            params.append(dst_ip)
+        if application:
+            where_clauses.append("application = %s")
+            params.append(application)
+        if severity:
+            # Severity is still derived from risk/alerts, so flow rows cannot filter it directly yet.
+            pass
+        search_clause, search_params = self._build_flow_search_filter(search)
+        if search_clause:
+            where_clauses.append(search_clause)
+            params.extend(search_params)
+
+        return " AND ".join(where_clauses), params
+
     def _recent_alert_exists(self, cursor, organization_id: str | None, sanitized, report: dict) -> bool:
         window_seconds = max(int(settings.FLOW_ALERT_DEDUPE_WINDOW_SECONDS or 0), 0)
         if not window_seconds or not sanitized.internal_device_ip:
@@ -1176,29 +1208,14 @@ class FlowService:
     ) -> dict:
         cursor = db_conn.cursor(dictionary=True)
         try:
-            params = [organization_id]
-            where_clauses = ["organization_id = %s"]
-
-            if src_ip:
-                where_clauses.append("src_ip = %s")
-                params.append(src_ip)
-            if dst_ip:
-                where_clauses.append("dst_ip = %s")
-                params.append(dst_ip)
-            if application:
-                where_clauses.append("application = %s")
-                params.append(application)
-            if severity:
-                # We need to join with device_risks or use alert status
-                # For now, let's just filter by a potential severity column if we add it, 
-                # but typically severity is computed. Let's filter by application/IP for now.
-                pass
-            search_clause, search_params = self._build_flow_search_filter(search)
-            if search_clause:
-                where_clauses.append(search_clause)
-                params.extend(search_params)
-
-            where_str = " AND ".join(where_clauses)
+            where_str, params = self.build_flow_log_query_parts(
+                organization_id,
+                src_ip=src_ip,
+                dst_ip=dst_ip,
+                application=application,
+                severity=severity,
+                search=search,
+            )
             
             # Count total
             count_sql = f"SELECT COUNT(*) as total FROM flow_logs WHERE {where_str}"

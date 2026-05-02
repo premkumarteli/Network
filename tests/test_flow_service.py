@@ -242,6 +242,30 @@ def test_flow_search_filter_uses_prefix_terms_for_text_search():
     assert "application LIKE %s" in clause
 
 
+def test_flow_log_query_parts_match_filter_contract():
+    where_sql, params = flow_service.build_flow_log_query_parts(
+        "org-1",
+        src_ip="10.0.0.10",
+        application="Microsoft",
+        search="edge.microsoft.com",
+    )
+
+    assert where_sql.startswith("organization_id = %s")
+    assert "src_ip = %s" in where_sql
+    assert "application = %s" in where_sql
+    assert "domain LIKE %s" in where_sql
+    assert params == [
+        "org-1",
+        "10.0.0.10",
+        "Microsoft",
+        "edge.microsoft.com",
+        "edge.microsoft.com",
+        "edge.microsoft.com%",
+        "edge.microsoft.com%",
+        "edge.microsoft.com",
+    ]
+
+
 class _RecentAlertCursor:
     def __init__(self, row):
         self.row = row
