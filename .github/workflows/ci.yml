@@ -30,8 +30,10 @@ jobs:
       NETVISOR_DB_USER: root
       NETVISOR_DB_PASSWORD: netvisor_ci_password
       NETVISOR_DB_NAME: network_security
+      NETVISOR_DEFAULT_ORGANIZATION_ID: default-org-id
       NETVISOR_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-1234567890
       NETVISOR_BACKUP_AND_RESET_ON_SHUTDOWN: "false"
+      NETVISOR_FLOW_WORKER_MODE: disabled
 
     steps:
       - name: Checkout
@@ -67,16 +69,23 @@ jobs:
       - name: Initialize test database
         run: python scripts/init_ci_database.py
 
-      - name: Run backend tests
+      - name: Run backend unit tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m pytest -q -p no:cacheprovider
+        run: >
+          python scripts/run_pytest_ci.py -q -p no:cacheprovider --tb=short -ra
+          --ignore=tests/test_runtime_probes.py
+
+      - name: Run runtime probes
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python scripts/run_pytest_ci.py -q -p no:cacheprovider --tb=short -ra tests/test_runtime_probes.py
 
       - name: Run security regression tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
         run: >
-          python -m pytest -q -p no:cacheprovider
+          python scripts/run_pytest_ci.py -q -p no:cacheprovider --tb=short -ra
           tests/test_agent_request_auth.py
           tests/test_agent_transport_policy.py
           tests/test_agent_transport_pins.py
