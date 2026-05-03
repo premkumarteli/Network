@@ -1,0 +1,10 @@
+# NetVisor CI/unit-test dependencies
+-r requirements-server.txt
+
+# The unit suite imports selected agent/gateway/collector modules.
+requests
+scapy
+colorama
+cryptography
+
+pytest
