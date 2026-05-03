@@ -65,6 +65,30 @@ def _select_remote_ip(packet) -> str | None:
     return None
 
 
+def _iter_dns_answers(answer, answer_count: int, dns_rr_type):
+    yielded = 0
+    current = answer
+
+    if isinstance(current, dns_rr_type):
+        while yielded < answer_count and isinstance(current, dns_rr_type):
+            yield current
+            yielded += 1
+            current = current.payload
+        return
+
+    try:
+        iterator = iter(current)
+    except TypeError:
+        return
+
+    for item in iterator:
+        if yielded >= answer_count:
+            break
+        if isinstance(item, dns_rr_type):
+            yield item
+            yielded += 1
+
+
 class DomainHintCache:
     def __init__(self, ttl_seconds: int = 300, max_entries: int = 2048) -> None:
         self.ttl_seconds = ttl_seconds
@@ -116,17 +140,13 @@ class DomainHintCache:
         if dns_layer.qr != 1:
             return question_name
 
-        answer = dns_layer.an
         answer_count = int(getattr(dns_layer, "ancount", 0) or 0)
-        for _ in range(answer_count):
-            if not isinstance(answer, DNSRR):
-                break
+        for answer in _iter_dns_answers(dns_layer.an, answer_count, DNSRR):
             answer_domain = _normalize_domain(
                 answer.rrname.decode(errors="ignore") if hasattr(answer.rrname, "decode") else str(answer.rrname)
             ) or question_name
             if answer.type in (1, 28):
                 self.remember(str(answer.rdata), answer_domain)
-            answer = answer.payload
 
         return question_name
 
