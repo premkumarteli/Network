@@ -7,6 +7,31 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: netvisor_ci_password
+          MYSQL_DATABASE: network_security
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pnetvisor_ci_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      NETVISOR_SECRET_KEY: ci-secret-key-1234567890
+      NETVISOR_AGENT_MASTER_KEY: ci-agent-master-key-1234567890
+      NETVISOR_GATEWAY_MASTER_KEY: ci-gateway-master-key-1234567890
+      AGENT_API_KEY: ci-agent-api-key-1234567890
+      GATEWAY_API_KEY: ci-gateway-api-key-1234567890
+      NETVISOR_DB_HOST: 127.0.0.1
+      NETVISOR_DB_USER: root
+      NETVISOR_DB_PASSWORD: netvisor_ci_password
+      NETVISOR_DB_NAME: network_security
+      NETVISOR_BOOTSTRAP_ADMIN_PASSWORD: ci-admin-password-1234567890
+      NETVISOR_BACKUP_AND_RESET_ON_SHUTDOWN: "false"
 
     steps:
       - name: Checkout
@@ -38,6 +63,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+
+      - name: Initialize test database
+        run: python scripts/init_ci_database.py
 
       - name: Run backend tests
         env:
