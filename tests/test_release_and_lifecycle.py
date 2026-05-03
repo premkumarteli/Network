@@ -185,8 +185,15 @@ def _load_bundle_builder():
     return module
 
 
-def test_deploy_bundle_includes_systemd_units(tmp_path):
+def test_deploy_bundle_includes_systemd_units(tmp_path, monkeypatch):
     builder = _load_bundle_builder()
+    monkeypatch.setattr(builder, "ensure_server_frontend_dist", lambda: None)
+    bundles = dict(builder.BUNDLES)
+    bundles["server"] = [
+        item for item in builder.BUNDLES["server"]
+        if item[0] != "frontend/dist"
+    ]
+    monkeypatch.setattr(builder, "BUNDLES", bundles)
     output_root = tmp_path / "deploy"
 
     agent_bundle = builder.build_bundle("agent", output_root)
