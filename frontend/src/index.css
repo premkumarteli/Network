@@ -111,11 +111,9 @@ a,
 
 body {
   font-family: "Inter", sans-serif;
-  background-color: var(--bg-dark);
-  color: var(--text-main);
+  /* background-color removed: base.css provides the designed gradient */
   overflow-x: hidden;
   opacity: 1;
-  -webkit-font-smoothing: antialiased;
 }
 
 .ambient-background {

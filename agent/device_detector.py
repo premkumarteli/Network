@@ -151,7 +151,7 @@ class DeviceDetector:
         )
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(0.3)
+        sock.settimeout(0.8)
 
         try:
             sock.sendto(netbios_query, (ip, 137))
@@ -339,13 +339,13 @@ class DeviceDetector:
 
     def resolve_hostname(self, ip):
         for resolver in (
+            self.get_dns_name,
             self.get_netbios_name,
             self.get_nbtstat_name,
             self.get_ping_name,
             self.get_roku_name,
             self.get_chromecast_name,
             self.get_upnp_name,
-            self.get_dns_name,
         ):
             name = resolver(ip)
             if name:

@@ -13,7 +13,7 @@ import Tabs from '../components/V2/Tabs';
 import DataTable from '../components/V2/DataTable';
 import { StatGridSkeleton, TableSkeleton } from '../components/UI/Skeletons';
 import { formatUtcTimestampToLocal } from '../utils/time';
-import { formatBrowserLabel, formatByteCount, getRiskTone } from '../utils/presentation';
+import { formatBrowserLabel, formatByteCount, getRiskTone, parseByteValue } from '../utils/presentation';
 import EvidenceDrawer from '../components/V2/EvidenceDrawer';
 
 const DashboardPage = () => {
@@ -108,7 +108,7 @@ const DashboardPage = () => {
       const raw = String(entry.hour || '').split(' ').pop() || '';
       return raw.slice(0, 5);
     }),
-    values: trafficHistory.map((entry) => Number(entry.byte_count || 0) / (1024 * 1024)),
+    values: trafficHistory.map((entry) => parseByteValue(entry.byte_count || 0) / (1024 * 1024)),
   }), [trafficHistory]);
 
   const analyticsTabs = [

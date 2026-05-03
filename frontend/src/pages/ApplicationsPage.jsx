@@ -72,7 +72,7 @@ const ApplicationsPage = () => {
     fetchApplications();
   }, [fetchApplications]);
 
-  useVisibilityPolling(fetchApplications, 5000);
+  useVisibilityPolling(fetchApplications, 15000);
 
   const handlePacketEvent = useCallback((event) => {
     setLiveFeed((current) => [event, ...current].slice(0, 160));

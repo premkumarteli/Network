@@ -37,10 +37,42 @@ def test_merge_devices_prefers_managed_and_named_rows():
     assert merged[0]["hostname"] == "STUDENT-LAPTOP"
 
 
+def test_merge_devices_dedupes_managed_rows_by_agent_id():
+    devices = [
+        {
+            "id": "AGENT-1",
+            "agent_id": "AGENT-1",
+            "ip": "10.128.88.172",
+            "mac": "00:11:22:33:44:55",
+            "hostname": "Unknown",
+            "management_mode": "managed",
+            "confidence": "medium",
+            "last_seen": "2026-03-20 08:00:00",
+        },
+        {
+            "id": "AGENT-1",
+            "agent_id": "AGENT-1",
+            "ip": "10.128.88.172",
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "hostname": "DESKTOP-IFIAG9L",
+            "management_mode": "managed",
+            "confidence": "high",
+            "last_seen": "2026-03-20 08:00:01",
+        },
+    ]
+
+    merged = device_service._merge_devices(devices)
+
+    assert len(merged) == 1
+    assert merged[0]["hostname"] == "DESKTOP-IFIAG9L"
+    assert merged[0]["mac"] == "aa:bb:cc:dd:ee:ff"
+
+
 def test_device_status_uses_online_idle_offline_thresholds():
     now = datetime.now(timezone.utc)
 
     assert device_service.get_device_status(now - timedelta(seconds=5)) == "Online"
     assert device_service.get_device_status(now - timedelta(seconds=30)) == "Idle"
-    assert device_service.get_device_status(now - timedelta(seconds=90)) == "Offline"
+    assert device_service.get_device_status(now - timedelta(seconds=90)) == "Idle"
+    assert device_service.get_device_status(now - timedelta(seconds=130)) == "Offline"
 

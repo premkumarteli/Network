@@ -19,7 +19,7 @@ const DevicesPage = () => {
   const [searchValue, setSearchValue] = useState('');
   const [modeFilter, setModeFilter] = useState('all');
 
-  const fetchDevices = async ({ background = false } = {}) => {
+  const fetchDevices = useCallback(async ({ background = false } = {}) => {
     if (!background) {
       setLoading(true);
     }
@@ -33,11 +33,11 @@ const DevicesPage = () => {
         setLoading(false);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchDevices();
-  }, []);
+  }, [fetchDevices]);
 
   useVisibilityPolling(() => fetchDevices({ background: true }), 5000);
 

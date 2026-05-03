@@ -222,7 +222,7 @@ const LogsPage = () => {
         />
 
         <div className="nv-inline-actions" style={{ justifyContent: 'space-between' }}>
-          <p>Showing {(page - 1) * PAGE_LIMIT + 1} to {Math.min(page * PAGE_LIMIT, total)} of {total}</p>
+          <p>{total > 0 ? `Showing ${(page - 1) * PAGE_LIMIT + 1} to ${Math.min(page * PAGE_LIMIT, total)} of ${total}` : '0 results'}</p>
           <div className="nv-inline-actions">
             <button
               type="button"

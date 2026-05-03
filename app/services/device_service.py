@@ -18,8 +18,8 @@ class DeviceService:
     Gateway-observed flows must never create devices directly.
     """
 
-    ONLINE_WINDOW_SECONDS = 10
-    IDLE_WINDOW_SECONDS = 60
+    ONLINE_WINDOW_SECONDS = 30   # 3x heartbeat interval (10s) to absorb normal latency
+    IDLE_WINDOW_SECONDS = 120
 
     def __init__(self) -> None:
         self._schema_ready = False
@@ -119,6 +119,13 @@ class DeviceService:
         )
 
     def _device_identity_key(self, device: dict) -> Optional[str]:
+        # Managed devices: identity is the agent, not the NIC.
+        # This prevents multi-NIC hosts from creating duplicate entries.
+        if device.get("management_mode") == "managed":
+            agent_id = device.get("agent_id") or device.get("id")
+            if agent_id:
+                return f"agent:{agent_id}"
+
         mac = normalize_mac(device.get("mac"))
         if mac:
             return f"mac:{mac}"

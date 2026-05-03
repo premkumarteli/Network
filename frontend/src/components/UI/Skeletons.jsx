@@ -1,5 +1,5 @@
 const StatGridSkeleton = ({ count = 4 }) => (
-  <div className="kpi-grid">
+  <div className="nv-metric-grid">
     {Array.from({ length: count }).map((_, index) => (
       <div key={index} className="skeleton-card shimmer">
         <div className="skeleton-line short"></div>

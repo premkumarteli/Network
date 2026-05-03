@@ -13,6 +13,20 @@ export const formatByteCount = (value) => {
   return `${Math.round(bytes)} B`;
 };
 
+export const parseByteValue = (value) => {
+  if (typeof value === 'number') return value;
+  if (typeof value !== 'string') return 0;
+  const match = value.trim().match(/^([\d.]+)\s*(B|KB|MB|GB)?$/i);
+  if (!match) {
+    const fallback = Number.parseFloat(value);
+    return Number.isFinite(fallback) ? fallback : 0;
+  }
+  const amount = Number.parseFloat(match[1]);
+  const unit = (match[2] || 'B').toUpperCase();
+  const scale = { B: 1, KB: 1024, MB: 1024 * 1024, GB: 1024 * 1024 * 1024 };
+  return Math.round(amount * (scale[unit] || 1));
+};
+
 export const formatPercent = (value) => `${Math.round(Number(value) || 0)}%`;
 
 export const getRiskTone = (riskLevel) => {
@@ -52,7 +66,7 @@ export const getStatusTone = (status) => {
   if (normalized === 'rejected' || normalized === 'revoked' || normalized === 'expired' || normalized === 'disabled' || normalized === 'offline' || normalized === 'failed') {
     return 'danger';
   }
-  return 'danger';
+  return 'neutral';
 };
 
 export const formatBrowserLabel = (browserName, processName) => {

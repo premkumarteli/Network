@@ -1,38 +1,63 @@
-﻿__pycache__/
+﻿# Env
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
 **/__pycache__/
 *.pyc
-*.log
-*.csv
-.vscode/
-.idea/
-.env
+*.egg-info/
+.pytest_cache/
+.pytest_tmp/
+.pytest_tmp_*/
+
+# Virtual env
 .venv/
 .venv-1/
 venv/
-.pytest_cache/
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-share_agent/
-share_agent.zip
-runtime/
-data/models/
-data/backups/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs & temp
+*.log
+*.out
 tmp/
 tmp_server_*.log
 tmp_pip/
+
+# Runtime & data
+runtime/
+data/models/
+data/backups/
 backups/
-build/deploy/
+device_inventory.json
+agent/device_inventory.json
+agent/agent_id.txt
+gateway_id.txt
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Build
 build/
+build/deploy/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.csv
+share_agent/
+share_agent.zip
 frontend.zip
 all_project_code.txt
 build_all_code.py
 current_env.txt
-agent_id.txt
-gateway_id.txt
-device_inventory.json
-agent/agent_id.txt
-agent/device_inventory.json
 legacy/
-.pytest_tmp/
-.pytest_tmp_*/
